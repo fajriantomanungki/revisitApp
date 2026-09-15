@@ -71,7 +71,7 @@ import com.google.maps.android.compose.MapType
 import com.google.maps.android.compose.MapUiSettings
 import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.rememberCameraPositionState
-import com.google.maps.android.compose.rememberUpdatedMarkerState
+import com.google.maps.android.compose.rememberMarkerState
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.text.NumberFormat
@@ -618,7 +618,8 @@ private fun DashboardMap(
         ) {
             markers.forEach { item ->
                 key(item.kodeSls) {
-                    val markerState = rememberUpdatedMarkerState(
+                    val markerState = rememberMarkerState(
+                        key = item.kodeSls,
                         position = LatLng(
                             item.latCentroid ?: 0.0,
                             item.lonCentroid ?: 0.0
