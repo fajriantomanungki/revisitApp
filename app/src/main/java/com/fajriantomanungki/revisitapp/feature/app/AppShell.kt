@@ -245,8 +245,11 @@ fun RevisitAppShell(
                 },
                 onAdd = {
                     if (wilayah.isEmpty()) {
-                        message =
-                            "Master wilayah belum tersedia. Perbarui data wilayah terlebih dahulu."
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar(
+                                "Master wilayah belum tersedia. Perbarui data wilayah terlebih dahulu."
+                            )
+                        }
                     } else {
                         isFormOpen = true
                     }
