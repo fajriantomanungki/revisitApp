@@ -32,9 +32,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -53,6 +54,7 @@ import com.fajriantomanungki.revisitapp.domain.safety.LogoutCheckResult
 import com.fajriantomanungki.revisitapp.feature.dashboard.DashboardScreen
 import com.fajriantomanungki.revisitapp.feature.pendataan.PendataanFormScreen
 import com.fajriantomanungki.revisitapp.feature.wilayah.MasterWilayahScreen
+import kotlinx.coroutines.launch
 
 @Composable
 fun RevisitAppShell(
@@ -186,7 +188,9 @@ fun RevisitAppShell(
             onSaved = {
                 isFormOpen = false
                 selectedTab = 0
-                message = "Pendataan tersimpan di perangkat."
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar("Pendataan tersimpan di perangkat.")
+                }
             },
             onBack = { isFormOpen = false }
         )
