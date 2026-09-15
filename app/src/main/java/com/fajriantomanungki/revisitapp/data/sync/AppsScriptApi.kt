@@ -1,6 +1,7 @@
 package com.fajriantomanungki.revisitapp.data.sync
 
 import android.util.Base64
+import android.net.Uri
 import com.fajriantomanungki.revisitapp.data.local.entity.FotoEntity
 import com.fajriantomanungki.revisitapp.data.local.entity.PendataanEntity
 import java.io.IOException
@@ -33,6 +34,42 @@ data class RemoteSyncItemResult(
 
 data class RemoteSyncResponse(
     val results: List<RemoteSyncItemResult>
+)
+
+data class RemoteWilayahRow(
+    val kodeKec: String,
+    val namaKec: String,
+    val kodeDesa: String,
+    val namaDesa: String,
+    val kodeSls: String,
+    val namaSls: String,
+    val targetResponden: Int,
+    val latCentroid: Double?,
+    val lonCentroid: Double?,
+    val version: Int
+)
+
+data class MasterApiResponse(
+    val version: Int,
+    val hasChanges: Boolean,
+    val rows: List<RemoteWilayahRow>
+)
+
+data class RemoteCoverageRow(
+    val kodeSls: String,
+    val target: Long,
+    val jumlahTerdata: Long
+)
+
+data class CoverageApiResponse(
+    val rows: List<RemoteCoverageRow>
+)
+
+data class LoginApiResponse(
+    val idPetugas: String,
+    val nama: String,
+    val wilayahPenugasan: String?,
+    val waktuServer: String?
 )
 
 class AppsScriptApiException(
@@ -88,6 +125,149 @@ class AppsScriptApi @Inject constructor() {
             driveFileId = driveFileId,
             url = response.optString("url", "").takeIf { it.isNotBlank() },
             urutan = photo.urutan
+        )
+    }
+
+    /** Mengambil master wilayah hanya jika versi server lebih baru. */
+    suspend fun getMaster(
+        config: SyncConfig,
+        localVersion: Int
+    ): MasterApiResponse = withContext(Dispatchers.IO) {
+        val response = requireSuccessfulResponse(
+            getJson(
+                endpointUrl = config.endpointUrl,
+                parameters = mapOf(
+                    "action" to "master",
+                    "token" to config.token,
+                    "versi" to localVersion.coerceAtLeast(0).toString()
+                )
+            )
+        )
+        val version = response.optInt("versi_master", localVersion)
+        val hasChanges = response.optBoolean(
+            "ada_perubahan",
+            response.optBoolean("has_update", false)
+        )
+        val array = response.optJSONArray("data") ?: JSONArray()
+        val rows = ArrayList<RemoteWilayahRow>(array.length())
+
+        for (index in 0 until array.length()) {
+            val item = array.optJSONObject(index)
+                ?: throw AppsScriptApiException(
+                    message = "Item master wilayah tidak valid pada index $index",
+                    errorCode = "RESPONS_TIDAK_VALID",
+                    retryable = true
+                )
+            val kodeSls = item.optString("kode_sls", "").trim()
+            if (kodeSls.isEmpty()) {
+                throw AppsScriptApiException(
+                    message = "Master wilayah tidak memiliki kode_sls",
+                    errorCode = "RESPONS_TIDAK_VALID",
+                    retryable = true
+                )
+            }
+            rows += RemoteWilayahRow(
+                kodeKec = item.optString("kode_kec", "").trim(),
+                namaKec = item.optString("nama_kec", "").trim(),
+                kodeDesa = item.optString("kode_desa", "").trim(),
+                namaDesa = item.optString("nama_desa", "").trim(),
+                kodeSls = kodeSls,
+                namaSls = item.optString("nama_sls", "").trim(),
+                targetResponden = item.optLong("target_responden", 0L)
+                    .coerceAtLeast(0L)
+                    .coerceAtMost(Int.MAX_VALUE.toLong())
+                    .toInt(),
+                latCentroid = item.optionalFiniteDouble("lat_centroid"),
+                lonCentroid = item.optionalFiniteDouble("lon_centroid"),
+                version = item.optInt("versi_master", version)
+            )
+        }
+
+        MasterApiResponse(
+            version = version,
+            hasChanges = hasChanges,
+            rows = rows
+        )
+    }
+
+    /** Mengambil cakupan server untuk cache Dashboard offline. */
+    suspend fun getCoverage(
+        config: SyncConfig,
+        idPetugas: String
+    ): CoverageApiResponse = withContext(Dispatchers.IO) {
+        val response = requireSuccessfulResponse(
+            getJson(
+                endpointUrl = config.endpointUrl,
+                parameters = mapOf(
+                    "action" to "cakupan",
+                    "token" to config.token,
+                    "id_petugas" to idPetugas
+                )
+            )
+        )
+        val array = response.optJSONArray("data") ?: JSONArray()
+        val rows = ArrayList<RemoteCoverageRow>(array.length())
+        for (index in 0 until array.length()) {
+            val item = array.optJSONObject(index)
+                ?: throw AppsScriptApiException(
+                    message = "Item cakupan tidak valid pada index $index",
+                    errorCode = "RESPONS_TIDAK_VALID",
+                    retryable = true
+                )
+            val kodeSls = item.optString("kode_sls", "").trim()
+            if (kodeSls.isEmpty()) {
+                throw AppsScriptApiException(
+                    message = "Cakupan tidak memiliki kode_sls",
+                    errorCode = "RESPONS_TIDAK_VALID",
+                    retryable = true
+                )
+            }
+            rows += RemoteCoverageRow(
+                kodeSls = kodeSls,
+                target = item.optLong("target", 0L),
+                jumlahTerdata = item.optLong(
+                    "jumlah_terdata",
+                    item.optLong("terdata", 0L)
+                )
+            )
+        }
+        CoverageApiResponse(rows = rows)
+    }
+
+    /** Memvalidasi PIN ke endpoint Apps Script tanpa menyimpan PIN mentah. */
+    suspend fun login(
+        config: SyncConfig,
+        idPetugas: String,
+        pin: String
+    ): LoginApiResponse = withContext(Dispatchers.IO) {
+        require(idPetugas.isNotBlank()) { "id_petugas tidak boleh kosong" }
+        require(pin.isNotBlank()) { "PIN tidak boleh kosong" }
+
+        val payload = JSONObject()
+            .put("action", "login")
+            .put("token", config.token)
+            .put("id_petugas", idPetugas.trim())
+            .put("pin", pin)
+
+        val response = requireSuccessfulResponse(
+            postJson(config.endpointUrl, payload)
+        )
+        val responseId = response.optString("id_petugas", "").trim()
+        if (responseId.isEmpty()) {
+            throw AppsScriptApiException(
+                message = "Respons login tidak memiliki id_petugas",
+                errorCode = "RESPONS_TIDAK_VALID",
+                retryable = true
+            )
+        }
+
+        LoginApiResponse(
+            idPetugas = responseId,
+            nama = response.optString("nama", "").trim(),
+            wilayahPenugasan = response.optString("wilayah_penugasan", "")
+                .takeIf { it.isNotBlank() },
+            waktuServer = response.optString("waktu_server", "")
+                .takeIf { it.isNotBlank() }
         )
     }
 
@@ -238,6 +418,63 @@ class AppsScriptApi @Inject constructor() {
         }
     }
 
+    private fun getJson(
+        endpointUrl: String,
+        parameters: Map<String, String>
+    ): JSONObject {
+        val uri = try {
+            Uri.parse(endpointUrl).buildUpon().apply {
+                parameters.forEach { (key, value) ->
+                    appendQueryParameter(key, value)
+                }
+            }.build().toString()
+        } catch (error: Exception) {
+            throw AppsScriptApiException(
+                message = "Endpoint Apps Script tidak valid",
+                errorCode = "ENDPOINT_TIDAK_VALID",
+                retryable = false,
+                cause = error
+            )
+        }
+        val connection = openGetConnection(uri)
+        return try {
+            val responseCode = connection.responseCode
+            val body = readResponseBody(connection, responseCode)
+            if (responseCode !in HTTP_SUCCESS..HTTP_SUCCESS_MAX) {
+                throw AppsScriptApiException(
+                    message = "Apps Script HTTP $responseCode" +
+                        body.takeIf { it.isNotBlank() }?.let { ": $it" }.orEmpty(),
+                    httpCode = responseCode,
+                    retryable = responseCode == HTTP_TIMEOUT ||
+                        responseCode == HTTP_TOO_MANY_REQUESTS ||
+                        responseCode >= HTTP_SERVER_ERROR
+                )
+            }
+            try {
+                JSONObject(body)
+            } catch (error: Exception) {
+                throw AppsScriptApiException(
+                    message = "Respons Apps Script bukan JSON yang valid",
+                    errorCode = "RESPONS_TIDAK_VALID",
+                    retryable = true,
+                    cause = error
+                )
+            }
+        } catch (error: AppsScriptApiException) {
+            throw error
+        } catch (error: IOException) {
+            throw AppsScriptApiException(
+                message = "Gagal terhubung ke Apps Script: " +
+                    (error.message ?: "I/O error"),
+                errorCode = "NETWORK_ERROR",
+                retryable = true,
+                cause = error
+            )
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     private fun openConnection(endpointUrl: String): HttpURLConnection {
         val url = try {
             URL(endpointUrl)
@@ -279,6 +516,52 @@ class AppsScriptApi @Inject constructor() {
                 cause = error
             )
         }
+    }
+
+    private fun openGetConnection(endpointUrl: String): HttpURLConnection {
+        val url = try {
+            URL(endpointUrl)
+        } catch (error: Exception) {
+            throw AppsScriptApiException(
+                message = "Endpoint Apps Script tidak valid",
+                errorCode = "ENDPOINT_TIDAK_VALID",
+                retryable = false,
+                cause = error
+            )
+        }
+
+        if (!url.protocol.equals("https", ignoreCase = true)) {
+            throw AppsScriptApiException(
+                message = "Endpoint Apps Script wajib menggunakan HTTPS",
+                errorCode = "ENDPOINT_TIDAK_AMAN",
+                retryable = false
+            )
+        }
+
+        return try {
+            (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = CONNECT_TIMEOUT_MILLIS
+                readTimeout = READ_TIMEOUT_MILLIS
+                doInput = true
+                useCaches = false
+                instanceFollowRedirects = true
+                setRequestProperty("Accept", "application/json")
+            }
+        } catch (error: IOException) {
+            throw AppsScriptApiException(
+                message = "Gagal membuka koneksi ke Apps Script: " +
+                    (error.message ?: "I/O error"),
+                errorCode = "NETWORK_ERROR",
+                retryable = true,
+                cause = error
+            )
+        }
+    }
+
+    private fun JSONObject.optionalFiniteDouble(name: String): Double? {
+        if (!has(name) || isNull(name)) return null
+        return optDouble(name, Double.NaN).takeIf { it.isFinite() }
     }
 
     private fun readResponseBody(

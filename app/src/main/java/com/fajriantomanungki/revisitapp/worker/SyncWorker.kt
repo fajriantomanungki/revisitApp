@@ -1,8 +1,13 @@
 package com.fajriantomanungki.revisitapp.worker
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
+import android.os.Build
+import androidx.core.app.NotificationCompat
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
+import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.fajriantomanungki.revisitapp.data.local.dao.FotoDao
@@ -68,6 +73,9 @@ class SyncWorker @AssistedInject constructor(
         if (requestedIdPetugas != null && requestedIdPetugas != config.idPetugas) {
             return failureResult("id_petugas pada antrean tidak sesuai sesi aktif")
         }
+
+        ensureNotificationChannel()
+        setForeground(createForegroundInfo(processed = 0, total = 0))
 
         /*
          * Jika proses sebelumnya mati setelah markSending(), record MENGIRIM
@@ -362,6 +370,45 @@ class SyncWorker @AssistedInject constructor(
                 KEY_MESSAGE to message
             )
         )
+        setForeground(createForegroundInfo(processed, total))
+    }
+
+    private fun ensureNotificationChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val manager = applicationContext.getSystemService(NotificationManager::class.java)
+            ?: return
+        manager.createNotificationChannel(
+            NotificationChannel(
+                NOTIFICATION_CHANNEL_ID,
+                "Sinkronisasi pendataan",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Kemajuan pengiriman data pendataan ke server"
+            }
+        )
+    }
+
+    private fun createForegroundInfo(
+        processed: Int,
+        total: Int
+    ): ForegroundInfo {
+        val text = if (total <= 0) {
+            "Menyiapkan sinkronisasi"
+        } else {
+            "Mengirim $processed dari $total"
+        }
+        val notification = NotificationCompat.Builder(
+            applicationContext,
+            NOTIFICATION_CHANNEL_ID
+        )
+            .setSmallIcon(android.R.drawable.stat_sys_upload)
+            .setContentTitle("Sinkronisasi data")
+            .setContentText(text)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setProgress(total.coerceAtLeast(0), processed.coerceIn(0, total.coerceAtLeast(0)), total <= 0)
+            .build()
+        return ForegroundInfo(NOTIFICATION_ID, notification)
     }
 
     private fun isRetryable(error: Throwable): Boolean {
@@ -398,5 +445,7 @@ class SyncWorker @AssistedInject constructor(
         const val MAX_BATCH_SIZE = 20
         const val MAX_ATTEMPTS_PER_SESSION = 3
         const val MAX_ERROR_LENGTH = 500
+        const val NOTIFICATION_CHANNEL_ID = "sync_pendataan"
+        const val NOTIFICATION_ID = 1001
     }
 }

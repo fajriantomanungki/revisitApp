@@ -89,6 +89,7 @@ fun DashboardScreen(
     cakupanCache: List<CakupanCacheEntity>,
     localCoverage: List<LocalCoverageCount>,
     modifier: Modifier = Modifier,
+    isRefreshing: Boolean = false,
     assignedSlsCodes: Set<String>? = null,
     lastServerSyncMillis: Long? = cakupanCache
         .map { it.waktuSinkron }
@@ -134,6 +135,7 @@ fun DashboardScreen(
         coverage = coverage,
         lastServerSyncMillis = lastServerSyncMillis,
         modifier = modifier,
+        isRefreshing = isRefreshing,
         assignedSlsCodes = assignedSlsCodes,
         onRefreshCoverage = onRefreshCoverage,
         onNavigate = onNavigate,
@@ -149,6 +151,7 @@ fun DashboardScreen(
 fun DashboardScreen(
     snapshot: DashboardCoverageSnapshot,
     modifier: Modifier = Modifier,
+    isRefreshing: Boolean = false,
     assignedSlsCodes: Set<String>? = null,
     onRefreshCoverage: (() -> Unit)? = null,
     onNavigate: (SlsCoverage) -> Unit = {},
@@ -159,6 +162,7 @@ fun DashboardScreen(
         coverage = snapshot.coverage,
         lastServerSyncMillis = snapshot.lastServerSyncMillis,
         modifier = modifier,
+        isRefreshing = isRefreshing,
         assignedSlsCodes = assignedSlsCodes,
         onRefreshCoverage = onRefreshCoverage,
         onNavigate = onNavigate,
@@ -172,6 +176,7 @@ private fun DashboardContent(
     coverage: List<SlsCoverage>,
     lastServerSyncMillis: Long?,
     modifier: Modifier,
+    isRefreshing: Boolean,
     assignedSlsCodes: Set<String>?,
     onRefreshCoverage: (() -> Unit)?,
     onNavigate: (SlsCoverage) -> Unit,
@@ -287,9 +292,10 @@ private fun DashboardContent(
                     if (onRefreshCoverage != null) {
                         OutlinedButton(
                             onClick = onRefreshCoverage,
+                            enabled = !isRefreshing,
                             modifier = Modifier.padding(end = 8.dp)
                         ) {
-                            Text("Perbarui")
+                            Text(if (isRefreshing) "Memperbarui..." else "Perbarui")
                         }
                     }
                 }

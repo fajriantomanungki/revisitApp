@@ -7,6 +7,7 @@
  *   GET  /exec?action=cakupan&id_petugas=P001&token=...
  *   POST /exec  { action: "upload_foto", ... }
  *   POST /exec  { action: "sync", ... }
+ *   POST /exec  { action: "login", ... }
  *
  * Konfigurasi wajib diletakkan pada Script Properties:
  *   SPREADSHEET_ID   = ID Google Spreadsheet
@@ -145,6 +146,7 @@ function doGet(e) {
  * Supported actions:
  *   upload_foto : menyimpan foto ber-watermark ke Google Drive.
  *   sync        : menyimpan metadata pendataan ke Google Spreadsheet.
+ *   login       : memvalidasi id petugas dan PIN.
  */
 function doPost(e) {
   try {
@@ -179,6 +181,10 @@ function doPost(e) {
 
     var action = String(payload.action || '').toLowerCase();
 
+    if (action === 'login') {
+      return handleLogin_(payload);
+    }
+
     if (action === 'upload_foto') {
       return handleUploadPhoto_(payload);
     }
@@ -194,6 +200,76 @@ function doPost(e) {
   } catch (error) {
     return errorResponseFromException_(error, 'doPost');
   }
+}
+
+/**
+ * Handler POST action=login.
+ *
+ * Kolom hash_pin pada sheet petugas harus berisi SHA-256 hex lowercase.
+ * Gunakan hashPin("PIN") dari editor Apps Script untuk membuat nilainya.
+ * PIN mentah tidak pernah disimpan atau dikembalikan oleh API.
+ */
+function handleLogin_(payload) {
+  var idPetugas = requireString_(
+    payload.id_petugas,
+    'id_petugas',
+    100
+  );
+  var pin = requireString_(
+    payload.pin !== undefined ? payload.pin : payload.password,
+    'pin',
+    100
+  );
+  var rows = readSheetObjects_(CONFIG.SHEETS.PETUGAS);
+  var worker = null;
+
+  rows.some(function(row) {
+    if (toText_(row.id_petugas) !== idPetugas) {
+      return false;
+    }
+
+    worker = row;
+    return true;
+  });
+
+  if (!worker) {
+    throw new ApiError(
+      'KREDENSIAL_TIDAK_VALID',
+      'Kode petugas atau PIN tidak valid.'
+    );
+  }
+
+  var isActive = normalizeBoolean_(
+    worker.aktif,
+    'aktif',
+    false
+  );
+  var storedHash = normalizePinHash_(worker.hash_pin);
+  var suppliedHash = sha256Hex_(pin);
+
+  if (
+    !isActive ||
+    !storedHash ||
+    !constantTimeEquals_(suppliedHash, storedHash)
+  ) {
+    throw new ApiError(
+      'KREDENSIAL_TIDAK_VALID',
+      'Kode petugas atau PIN tidak valid.'
+    );
+  }
+
+  return jsonResponse_({
+    ok: true,
+    id_petugas: idPetugas,
+    nama: toText_(worker.nama),
+    wilayah_penugasan: worker.wilayah_penugasan,
+    waktu_server: new Date().toISOString()
+  });
+}
+
+/** Jalankan dari editor Apps Script untuk membuat hash SHA-256 PIN. */
+function hashPin(pin) {
+  return sha256Hex_(requireString_(pin, 'pin', 100));
 }
 
 /**
@@ -1837,6 +1913,29 @@ function requireUuid_(value, fieldName) {
   }
 
   return uuid;
+}
+
+function normalizePinHash_(value) {
+  var hash = toText_(value).toLowerCase();
+  if (hash.indexOf('sha256:') === 0) {
+    hash = hash.substring('sha256:'.length);
+  }
+
+  return /^[0-9a-f]{64}$/.test(hash) ? hash : '';
+}
+
+function sha256Hex_(value) {
+  var bytes = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    String(value),
+    Utilities.Charset.UTF_8
+  );
+
+  return bytes.map(function(byte) {
+    var unsignedByte = byte < 0 ? byte + 256 : byte;
+    return (unsignedByte < 16 ? '0' : '') +
+      unsignedByte.toString(16);
+  }).join('');
 }
 
 function assertToken_(token) {

@@ -6,12 +6,19 @@ import android.net.Uri
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import javax.inject.Inject
 
 data class SyncConfig(
     val endpointUrl: String,
     val token: String,
     val idPetugas: String
+)
+
+data class CachedIdentity(
+    val idPetugas: String,
+    val nama: String
 )
 
 /**
@@ -56,6 +63,51 @@ class SyncConfigStore @Inject constructor(
             .apply()
     }
 
+    /**
+     * Menyimpan sesi setelah login online. PIN hanya disimpan sebagai
+     * SHA-256 sehingga login offline tidak membutuhkan PIN mentah di disk.
+     */
+    fun saveAuthenticated(
+        endpointUrl: String,
+        token: String,
+        idPetugas: String,
+        nama: String,
+        pin: String
+    ) {
+        require(pin.isNotBlank()) { "PIN tidak boleh kosong" }
+        save(endpointUrl, token, idPetugas)
+        preferences.edit()
+            .putString(KEY_NAMA, nama.trim())
+            .putString(KEY_PIN_DIGEST, sha256(pin))
+            .apply()
+    }
+
+    fun readCachedIdentity(): CachedIdentity? {
+        val idPetugas = preferences.getString(KEY_ID_PETUGAS, null)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: return null
+        val nama = preferences.getString(KEY_NAMA, "")?.trim().orEmpty()
+        return CachedIdentity(idPetugas = idPetugas, nama = nama)
+    }
+
+    /** Memvalidasi sesi perangkat tanpa jaringan. */
+    fun canLoginOffline(idPetugas: String, pin: String): Boolean {
+        val storedId = preferences.getString(KEY_ID_PETUGAS, null)
+            ?.trim()
+            ?: return false
+        val storedDigest = preferences.getString(KEY_PIN_DIGEST, null)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: return false
+        if (storedId != idPetugas.trim() || pin.isBlank()) return false
+
+        return MessageDigest.isEqual(
+            storedDigest.toByteArray(StandardCharsets.UTF_8),
+            sha256(pin).toByteArray(StandardCharsets.UTF_8)
+        )
+    }
+
     fun read(): SyncConfig? {
         val endpointUrl = preferences.getString(KEY_ENDPOINT_URL, null)
             ?.trim()
@@ -81,10 +133,20 @@ class SyncConfigStore @Inject constructor(
         preferences.edit().clear().apply()
     }
 
+    private fun sha256(value: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(value.toByteArray(StandardCharsets.UTF_8))
+        return digest.joinToString(separator = "") { byte ->
+            "%02x".format(byte.toInt() and 0xff)
+        }
+    }
+
     private companion object {
         const val PREFERENCES_FILE = "sync_secure_preferences"
         const val KEY_ENDPOINT_URL = "endpoint_url"
         const val KEY_TOKEN = "api_token"
         const val KEY_ID_PETUGAS = "id_petugas"
+        const val KEY_NAMA = "nama_petugas"
+        const val KEY_PIN_DIGEST = "pin_digest"
     }
 }

@@ -2,7 +2,6 @@ package com.fajriantomanungki.revisitapp.data.local.dao
 
 import androidx.room.ColumnInfo
 import androidx.room.Dao
-import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
@@ -247,18 +246,21 @@ interface PendataanDao {
         waktuDiubah: Long
     ): Int
 
-    @Delete
-    suspend fun delete(row: PendataanEntity): Int
-
     /**
-     * Record berstatus TERKIRIM tidak dapat dihapus lewat DAO.
+     * Record berstatus TERKIRIM tidak dapat dihapus lewat DAO. Semua caller
+     * wajib menggunakan operasi yang menyertakan id_petugas agar satu sesi
+     * tidak dapat menghapus data milik petugas lain.
      */
     @Query(
         """
         DELETE FROM pendataan
         WHERE id_record = :idRecord
+          AND id_petugas = :idPetugas
           AND status_kirim != 'TERKIRIM'
         """
     )
-    suspend fun deleteIfNotSent(idRecord: String): Int
+    suspend fun deleteIfNotSent(
+        idRecord: String,
+        idPetugas: String
+    ): Int
 }
