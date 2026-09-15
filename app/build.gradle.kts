@@ -1,9 +1,17 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
     id("com.google.dagger.hilt.android")
+}
+
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.isFile) {
+    localPropertiesFile.inputStream().use { localProperties.load(it) }
 }
 
 android {
@@ -23,7 +31,9 @@ android {
         }
 
         manifestPlaceholders["MAPS_API_KEY"] =
-            project.findProperty("MAPS_API_KEY")?.toString().orEmpty()
+            project.findProperty("MAPS_API_KEY")?.toString()
+                ?.takeIf { it.isNotBlank() }
+                ?: localProperties.getProperty("MAPS_API_KEY").orEmpty()
     }
 
     buildTypes {
