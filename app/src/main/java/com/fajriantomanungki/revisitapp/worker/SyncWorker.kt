@@ -17,6 +17,7 @@ import com.fajriantomanungki.revisitapp.data.local.model.SyncStatus
 import com.fajriantomanungki.revisitapp.data.sync.AppsScriptApi
 import com.fajriantomanungki.revisitapp.data.sync.AppsScriptApiException
 import com.fajriantomanungki.revisitapp.data.sync.RemoteSyncItemResult
+import com.fajriantomanungki.revisitapp.data.sync.SyncConfig
 import com.fajriantomanungki.revisitapp.data.sync.SyncConfigStore
 import com.fajriantomanungki.revisitapp.data.sync.SyncPayloadRecord
 import com.fajriantomanungki.revisitapp.data.sync.UploadedPhotoReference
