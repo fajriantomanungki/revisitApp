@@ -43,7 +43,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.awaitDispose
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -84,6 +83,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -921,10 +921,13 @@ private fun PhotoPreview(
             previewFile?.let(::decodePreviewBitmap)
         }
         value = decoded
-        awaitDispose {
+        try {
+            awaitCancellation()
+        } finally {
             decoded?.takeIf { !it.isRecycled }?.recycle()
         }
     }
+    val previewBitmap = bitmap
     Card(
         modifier = Modifier.width(104.dp),
         shape = MaterialTheme.shapes.medium,
@@ -937,9 +940,9 @@ private fun PhotoPreview(
             modifier = Modifier.padding(4.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            if (bitmap != null) {
+            if (previewBitmap != null) {
                 Image(
-                    bitmap = bitmap.asImageBitmap(),
+                    bitmap = previewBitmap.asImageBitmap(),
                     contentDescription = "Pratinjau foto ${index + 1}",
                     modifier = Modifier
                         .size(94.dp)
