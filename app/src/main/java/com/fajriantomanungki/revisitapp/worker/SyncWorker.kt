@@ -3,6 +3,7 @@ package com.fajriantomanungki.revisitapp.worker
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.pm.ServiceInfo
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.hilt.work.HiltWorker
@@ -409,7 +410,11 @@ class SyncWorker @AssistedInject constructor(
             .setOnlyAlertOnce(true)
             .setProgress(total.coerceAtLeast(0), processed.coerceIn(0, total.coerceAtLeast(0)), total <= 0)
             .build()
-        return ForegroundInfo(NOTIFICATION_ID, notification)
+        return ForegroundInfo(
+            NOTIFICATION_ID,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        )
     }
 
     private fun isRetryable(error: Throwable): Boolean {
