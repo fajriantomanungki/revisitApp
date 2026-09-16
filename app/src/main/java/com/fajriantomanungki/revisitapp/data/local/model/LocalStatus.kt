@@ -8,6 +8,14 @@ object SyncStatus {
     const val GAGAL = "GAGAL"
 }
 
+object LaporanKegiatanStatus {
+    const val DRAFT = "DRAFT"
+    const val SIAP_KIRIM = "SIAP_KIRIM"
+    const val MENGIRIM = "MENGIRIM"
+    const val TERKIRIM = "TERKIRIM"
+    const val GAGAL = "GAGAL"
+}
+
 object StatusPendataan {
     const val LENGKAP = "LENGKAP"
     const val TIDAK_LENGKAP = "TIDAK_LENGKAP"

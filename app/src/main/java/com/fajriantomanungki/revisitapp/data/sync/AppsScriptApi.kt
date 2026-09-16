@@ -3,6 +3,7 @@ package com.fajriantomanungki.revisitapp.data.sync
 import android.util.Base64
 import android.net.Uri
 import com.fajriantomanungki.revisitapp.data.local.entity.FotoEntity
+import com.fajriantomanungki.revisitapp.data.local.entity.LaporanKegiatanEntity
 import com.fajriantomanungki.revisitapp.data.local.entity.PendataanEntity
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -23,7 +24,8 @@ data class UploadedPhotoReference(
 
 data class SyncPayloadRecord(
     val record: PendataanEntity,
-    val photos: List<UploadedPhotoReference>
+    val photos: List<UploadedPhotoReference>,
+    val replaceExisting: Boolean = record.replaceExisting
 )
 
 data class RemoteSyncItemResult(
@@ -34,6 +36,16 @@ data class RemoteSyncItemResult(
 
 data class RemoteSyncResponse(
     val results: List<RemoteSyncItemResult>
+)
+
+data class RemoteLaporanSyncItemResult(
+    val idLaporan: String,
+    val status: String,
+    val message: String?
+)
+
+data class RemoteLaporanSyncResponse(
+    val results: List<RemoteLaporanSyncItemResult>
 )
 
 data class RemoteWilayahRow(
@@ -336,6 +348,73 @@ class AppsScriptApi @Inject constructor() {
         RemoteSyncResponse(results = results)
     }
 
+    suspend fun syncDailyReports(
+        config: SyncConfig,
+        idPetugas: String,
+        reports: List<LaporanKegiatanEntity>
+    ): RemoteLaporanSyncResponse = withContext(Dispatchers.IO) {
+        require(reports.isNotEmpty()) { "Batch laporan tidak boleh kosong" }
+        require(reports.size <= MAX_BATCH_SIZE) {
+            "Batch laporan maksimal $MAX_BATCH_SIZE laporan"
+        }
+
+        val reportArray = JSONArray()
+        reports.forEach { report ->
+            reportArray.put(
+                JSONObject()
+                    .put("id_laporan", report.idLaporan)
+                    .put("id_petugas", report.idPetugas)
+                    .put("tanggal", report.tanggal)
+                    .put("rangkuman", report.rangkuman)
+                    .put("versi_app", report.versiApp)
+            )
+        }
+
+        val response = requireSuccessfulResponse(
+            postJson(
+                config.endpointUrl,
+                JSONObject()
+                    .put("action", "sync_laporan_kegiatan")
+                    .put("token", config.token)
+                    .put("id_petugas", idPetugas)
+                    .put("laporan", reportArray)
+            )
+        )
+        val resultArray = response.optJSONArray("hasil")
+            ?: throw AppsScriptApiException(
+                message = "Respons laporan tidak memiliki array hasil",
+                errorCode = "RESPONS_TIDAK_VALID",
+                retryable = true
+            )
+        val results = ArrayList<RemoteLaporanSyncItemResult>(resultArray.length())
+        for (index in 0 until resultArray.length()) {
+            val item = resultArray.optJSONObject(index)
+                ?: throw AppsScriptApiException(
+                    message = "Item hasil laporan tidak valid pada index $index",
+                    errorCode = "RESPONS_TIDAK_VALID",
+                    retryable = true
+                )
+            val idLaporan = item.optString("id_laporan", "").trim()
+            val status = item.optString("status", "").trim().uppercase()
+            if (idLaporan.isEmpty() || status !in VALID_STATUSES) {
+                throw AppsScriptApiException(
+                    message = "Hasil laporan memiliki id_laporan/status tidak valid",
+                    errorCode = "RESPONS_TIDAK_VALID",
+                    retryable = true
+                )
+            }
+            results += RemoteLaporanSyncItemResult(
+                idLaporan = idLaporan,
+                status = status,
+                message = item.optString("pesan", "")
+                    .takeIf { it.isNotBlank() }
+                    ?: item.optString("message", "")
+                        .takeIf { it.isNotBlank() }
+            )
+        }
+        RemoteLaporanSyncResponse(results = results)
+    }
+
     private fun SyncPayloadRecord.toJson(): JSONObject {
         val recordJson = JSONObject()
             .put("id_record", record.idRecord)
@@ -354,6 +433,7 @@ class AppsScriptApi @Inject constructor() {
             .put("status_pendataan", record.statusPendataan)
             .put("catatan", record.catatan)
             .put("is_mock", record.isMock)
+            .put("replace_existing", replaceExisting)
             .put("versi_app", record.versiApp)
 
         record.latitude?.let { recordJson.put("latitude", it) }

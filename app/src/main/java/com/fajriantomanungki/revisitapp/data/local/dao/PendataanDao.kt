@@ -216,6 +216,10 @@ interface PendataanDao {
             pesan_error = :pesanError,
             percobaan_kirim = :percobaanKirim,
             waktu_terkirim = :waktuTerkirim,
+            replace_existing = CASE
+                WHEN :statusKirim = 'TERKIRIM' THEN 0
+                ELSE replace_existing
+            END,
             waktu_diubah = :waktuDiubah
         WHERE id_record = :idRecord
           AND status_kirim != 'TERKIRIM'

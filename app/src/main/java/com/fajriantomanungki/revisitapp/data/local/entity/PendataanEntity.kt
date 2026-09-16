@@ -93,6 +93,10 @@ data class PendataanEntity(
     @ColumnInfo(name = "status_kirim")
     val statusKirim: String = SyncStatus.DRAFT,
 
+    /** True bila record TERKIRIM diedit dan harus diperbarui di server. */
+    @ColumnInfo(name = "replace_existing")
+    val replaceExisting: Boolean = false,
+
     @ColumnInfo(name = "pesan_error")
     val pesanError: String? = null,
 

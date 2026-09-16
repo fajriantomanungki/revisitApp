@@ -55,6 +55,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.fajriantomanungki.revisitapp.data.dashboard.DashboardCoverageSnapshot
+import com.fajriantomanungki.revisitapp.data.local.entity.LaporanKegiatanEntity
 import com.fajriantomanungki.revisitapp.data.local.entity.PendataanEntity
 import com.fajriantomanungki.revisitapp.data.local.entity.WilayahEntity
 import com.fajriantomanungki.revisitapp.data.local.model.SyncStatus
@@ -64,7 +65,7 @@ import com.fajriantomanungki.revisitapp.domain.media.WatermarkEngine
 import com.fajriantomanungki.revisitapp.domain.safety.LogoutCheckResult
 import com.fajriantomanungki.revisitapp.feature.dashboard.DashboardScreen
 import com.fajriantomanungki.revisitapp.feature.pendataan.PendataanFormScreen
-import com.fajriantomanungki.revisitapp.feature.wilayah.MasterWilayahScreen
+import com.fajriantomanungki.revisitapp.feature.laporan.LaporanKegiatanScreen
 import kotlinx.coroutines.launch
 
 @Composable
@@ -74,6 +75,7 @@ fun RevisitAppShell(
     kabupaten: String,
     wilayah: List<WilayahEntity>,
     pendataan: List<PendataanEntity>,
+    laporanKegiatan: List<LaporanKegiatanEntity>,
     dashboardSnapshot: DashboardCoverageSnapshot,
     locationHelper: LocationHelper,
     watermarkEngine: WatermarkEngine,
@@ -85,11 +87,13 @@ fun RevisitAppShell(
     onRefreshCoverage: () -> Unit,
     onSend: () -> Unit,
     onSavePendataan: suspend (PendataanFormSubmission) -> Result<Unit>,
+    onSaveLaporanKegiatan: suspend (tanggal: String, rangkuman: String, siapKirim: Boolean) -> Result<Unit>,
     onLogout: suspend () -> LogoutCheckResult,
     onDeletePendataan: suspend (PendataanEntity) -> Boolean
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var isFormOpen by rememberSaveable { mutableStateOf(false) }
+    var editingRow by remember { mutableStateOf<PendataanEntity?>(null) }
     var isLoggingOut by remember { mutableStateOf(false) }
     var rowToDelete by remember { mutableStateOf<PendataanEntity?>(null) }
     var isDeleting by remember { mutableStateOf(false) }
@@ -198,15 +202,20 @@ fun RevisitAppShell(
             wilayah = wilayah,
             locationHelper = locationHelper,
             watermarkEngine = watermarkEngine,
+            existing = editingRow,
             onSave = onSavePendataan,
             onSaved = {
                 isFormOpen = false
+                editingRow = null
                 selectedTab = 0
                 coroutineScope.launch {
                     snackbarHostState.showSnackbar("Pendataan tersimpan di perangkat.")
                 }
             },
-            onBack = { isFormOpen = false }
+            onBack = {
+                isFormOpen = false
+                editingRow = null
+            }
         )
         return
     }
@@ -220,7 +229,7 @@ fun RevisitAppShell(
             ) {
                 listOf(
                     "Pendataan" to "P",
-                    "Wilayah" to "W",
+                    "Laporan" to "L",
                     "Dashboard" to "D"
                 ).forEachIndexed { index, (label, glyph) ->
                     NavigationBarItem(
@@ -254,6 +263,10 @@ fun RevisitAppShell(
                 onSend = onSend,
                 canAdd = wilayah.isNotEmpty(),
                 onDelete = { rowToDelete = it },
+                onEdit = {
+                    editingRow = it
+                    isFormOpen = true
+                },
                 isLoggingOut = isLoggingOut,
                 onLogout = {
                     coroutineScope.launch {
@@ -281,21 +294,26 @@ fun RevisitAppShell(
                     if (wilayah.isEmpty()) {
                         coroutineScope.launch {
                             snackbarHostState.showSnackbar(
-                                "Master wilayah belum tersedia. Perbarui data wilayah terlebih dahulu."
+                        "Master wilayah belum tersedia. Perbarui data wilayah terlebih dahulu."
                             )
                         }
                     } else {
+                        editingRow = null
                         isFormOpen = true
                     }
                 }
             )
 
-            1 -> MasterWilayahScreen(
+            1 -> LaporanKegiatanScreen(
                 modifier = Modifier.padding(paddingValues),
-                wilayah = wilayah,
-                fixedKodeKabupaten = kodeKabupaten,
-                isRefreshing = isMasterRefreshing,
-                onRefreshMaster = onRefreshMaster
+                idPetugas = idPetugas,
+                kabupaten = kabupaten,
+                pendataan = pendataan,
+                laporan = laporanKegiatan,
+                isMasterRefreshing = isMasterRefreshing,
+                onRefreshMaster = onRefreshMaster,
+                onSave = onSaveLaporanKegiatan,
+                onSend = onSend
             )
 
             else -> DashboardScreen(
@@ -317,6 +335,7 @@ private fun PendataanListScreen(
     onSend: () -> Unit,
     canAdd: Boolean,
     onDelete: (PendataanEntity) -> Unit,
+    onEdit: (PendataanEntity) -> Unit,
     isLoggingOut: Boolean,
     onLogout: () -> Unit,
     onAdd: () -> Unit
@@ -513,7 +532,11 @@ private fun PendataanListScreen(
             }
         } else {
             items(rows, key = { it.idRecord }) { row ->
-                PendataanRow(row, onDelete = { onDelete(row) })
+                PendataanRow(
+                    row,
+                    onDelete = { onDelete(row) },
+                    onEdit = { onEdit(row) }
+                )
             }
         }
     }
@@ -602,7 +625,8 @@ private fun SummaryCard(
 @Composable
 private fun PendataanRow(
     row: PendataanEntity,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onEdit: () -> Unit
 ) {
     val (label, color, symbol) = when (row.statusKirim) {
         SyncStatus.DRAFT -> Triple("DRAFT", Color.Gray, "○")
@@ -664,18 +688,30 @@ private fun PendataanRow(
                     style = MaterialTheme.typography.bodySmall
                 )
             }
-            if (row.statusKirim == SyncStatus.TERKIRIM) {
-                Text(
-                    text = "Read-only: sudah tersimpan di server",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 TextButton(
-                    onClick = onDelete,
+                    onClick = onEdit,
+                    enabled = row.statusKirim != SyncStatus.MENGIRIM,
                     contentPadding = PaddingValues(horizontal = 0.dp)
                 ) {
-                    Text("Hapus")
+                    Text(
+                        if (row.statusKirim == SyncStatus.TERKIRIM) {
+                            "Edit & Kirim Ulang"
+                        } else {
+                            "Edit"
+                        }
+                    )
+                }
+                if (row.statusKirim != SyncStatus.TERKIRIM) {
+                    TextButton(
+                        onClick = onDelete,
+                        contentPadding = PaddingValues(horizontal = 0.dp)
+                    ) {
+                        Text("Hapus")
+                    }
                 }
             }
         }

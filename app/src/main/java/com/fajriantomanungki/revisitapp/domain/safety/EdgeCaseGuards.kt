@@ -2,6 +2,7 @@ package com.fajriantomanungki.revisitapp.domain.safety
 
 import android.location.Location
 import androidx.core.location.LocationCompat
+import com.fajriantomanungki.revisitapp.data.local.dao.LaporanKegiatanDao
 import com.fajriantomanungki.revisitapp.data.local.dao.PendataanDao
 import com.fajriantomanungki.revisitapp.data.local.dao.PendataanStatusCount
 import com.fajriantomanungki.revisitapp.data.local.model.SyncStatus
@@ -135,15 +136,17 @@ data class LogoutCheckResult(
     val siapKirimCount: Long,
     val mengirimCount: Long,
     val gagalCount: Long,
-    val warningMessage: String?
+    val warningMessage: String?,
+    val laporanCount: Long = 0L
 ) {
     val blockedEntryCount: Long
-        get() = draftCount + siapKirimCount + mengirimCount + gagalCount
+        get() = draftCount + siapKirimCount + mengirimCount + gagalCount + laporanCount
 }
 
 /** Menolak logout jika masih ada pekerjaan lokal yang belum terselesaikan. */
 class LogoutGuard @Inject constructor(
-    private val pendataanDao: PendataanDao
+    private val pendataanDao: PendataanDao,
+    private val laporanKegiatanDao: LaporanKegiatanDao
 ) {
 
     suspend fun check(idPetugas: String): LogoutCheckResult {
@@ -161,13 +164,16 @@ class LogoutGuard @Inject constructor(
         val summary = withContext(Dispatchers.IO) {
             pendataanDao.observeStatusSummary(idPetugas).first()
         }
+        val laporanCount = withContext(Dispatchers.IO) {
+            laporanKegiatanDao.countPendingForLogout(idPetugas)
+        }
         val draftCount = summary.countFor(SyncStatus.DRAFT)
         val siapKirimCount = summary.countFor(SyncStatus.SIAP_KIRIM)
         val mengirimCount = summary.countFor(SyncStatus.MENGIRIM)
         val gagalCount = summary.countFor(SyncStatus.GAGAL)
 
         if (draftCount == 0L && siapKirimCount == 0L &&
-            mengirimCount == 0L && gagalCount == 0L
+            mengirimCount == 0L && gagalCount == 0L && laporanCount == 0L
         ) {
             return LogoutCheckResult(
                 canLogout = true,
@@ -184,6 +190,7 @@ class LogoutGuard @Inject constructor(
         if (siapKirimCount > 0L) pendingParts += "$siapKirimCount SIAP_KIRIM"
         if (mengirimCount > 0L) pendingParts += "$mengirimCount MENGIRIM"
         if (gagalCount > 0L) pendingParts += "$gagalCount GAGAL"
+        if (laporanCount > 0L) pendingParts += "$laporanCount laporan kegiatan"
 
         return LogoutCheckResult(
             canLogout = false,
@@ -193,7 +200,8 @@ class LogoutGuard @Inject constructor(
             gagalCount = gagalCount,
             warningMessage = "Logout ditolak. Masih ada " +
                 pendingParts.joinToString(" dan ") + ". Lengkapi, hapus, atau " +
-                "selesaikan pengiriman sebelum logout."
+                "selesaikan pengiriman sebelum logout.",
+            laporanCount = laporanCount
         )
     }
 

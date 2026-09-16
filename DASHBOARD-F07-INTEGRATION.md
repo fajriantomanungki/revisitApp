@@ -12,6 +12,9 @@ offline-first pada aplikasi.
 - Input dan pembaruan petugas.
 - Import master wilayah Kabupaten–Kecamatan–Desa–SLS.
 - Pembuatan laporan PDF per petugas.
+- Login dashboard berbasis username/password dan pendaftaran admin baru.
+- Pembuatan laporan kegiatan harian yang menggabungkan rangkuman, hasil
+  pendataan, tanggal, dan foto.
 
 Target seorang petugas aktif adalah 126 responden (`14 SLS × 9 responden`).
 Target kabupaten dihitung dari jumlah petugas aktif dikalikan 126, sedangkan
@@ -64,3 +67,30 @@ DashboardScreen(
 ```
 
 Tidak ada dependensi Google Maps pada modul dashboard Android.
+
+## Laporan kegiatan harian
+
+Android menyimpan satu rangkuman per petugas dan tanggal pada Room table
+`laporan_kegiatan`. Tombol **Simpan & Kirim** memasukkannya ke antrean
+WorkManager. Apps Script meng-upsert data tersebut ke sheet `laporan_kegiatan`
+melalui action POST `sync_laporan_kegiatan`.
+
+Pada dashboard, buka **Laporan PDF → Laporan Kegiatan Harian**, pilih petugas
+dan periode, lalu buat PDF. File final dibuat melalui Google Docs sementara,
+diekspor sebagai PDF, dan disimpan pada `REPORT_FOLDER_ID` (atau folder foto
+sebagai fallback). Foto hanya diambil dari file Drive yang berada pada folder
+foto terkonfigurasi.
+
+## Login dan admin dashboard
+
+Jalankan `setupBackend()` atau `migrateBackendSchema()` satu kali setelah
+menyalin kode terbaru. Jika sheet `admin` masih kosong, sistem membuat akun:
+
+```text
+username: manungki.fajri
+password: 1234
+```
+
+Setelah masuk, gunakan menu **Admin** untuk mendaftarkan akun tambahan. Password
+disimpan sebagai SHA-256 pada Spreadsheet; password mentah tidak dikembalikan
+ke browser.

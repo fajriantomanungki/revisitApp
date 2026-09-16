@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -55,10 +56,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import com.fajriantomanungki.revisitapp.data.local.entity.WilayahEntity
+import com.fajriantomanungki.revisitapp.data.local.entity.PendataanEntity
 import com.fajriantomanungki.revisitapp.data.local.model.JenisObjek
 import com.fajriantomanungki.revisitapp.data.local.model.StatusPendataan
+import com.fajriantomanungki.revisitapp.data.local.model.SyncStatus
 import com.fajriantomanungki.revisitapp.data.pendataan.PendataanFormSubmission
 import com.fajriantomanungki.revisitapp.domain.location.CapturedLocation
 import com.fajriantomanungki.revisitapp.domain.location.LocationCaptureResult
@@ -86,20 +90,63 @@ fun PendataanFormScreen(
     wilayah: List<WilayahEntity>,
     locationHelper: LocationHelper,
     watermarkEngine: WatermarkEngine,
+    existing: PendataanEntity? = null,
     onSave: suspend (PendataanFormSubmission) -> Result<Unit>,
     onSaved: () -> Unit,
     onBack: () -> Unit
 ) {
-    var selection by remember { mutableStateOf(WilayahSelection()) }
-    var capturedLocation by remember { mutableStateOf<CapturedLocation?>(null) }
-    var locationAudit by remember { mutableStateOf<LocationAuditResult?>(null) }
-    var jenisObjek by rememberSaveable { mutableStateOf(JenisObjek.KELUARGA) }
-    var namaObjek by rememberSaveable { mutableStateOf("") }
-    var alamat by rememberSaveable { mutableStateOf("") }
-    var statusPendataan by rememberSaveable {
-        mutableStateOf(StatusPendataan.LENGKAP)
+    val existingRegion = remember(wilayah, existing?.idRecord) {
+        existing?.let { row ->
+            wilayah.firstOrNull { it.kodeSls == row.kodeSls }
+                ?: row.toWilayahEntity()
+                    .takeIf { it.kodeSls.isNotBlank() }
+        }
     }
-    var catatan by rememberSaveable { mutableStateOf("") }
+    val formWilayah = remember(wilayah, existingRegion?.kodeSls) {
+        if (existingRegion != null && wilayah.none { it.kodeSls == existingRegion.kodeSls }) {
+            wilayah + existingRegion
+        } else {
+            wilayah
+        }
+    }
+    val initialSelection = remember(existingRegion?.kodeSls) {
+        existingRegion?.let { row ->
+            WilayahSelection(
+                kabupaten = row,
+                kecamatan = row,
+                desa = row,
+                sls = row
+            )
+        } ?: WilayahSelection()
+    }
+    var selection by remember(existing?.idRecord) {
+        mutableStateOf(initialSelection)
+    }
+    var capturedLocation by remember(existing?.idRecord) {
+        mutableStateOf(existing?.toCapturedLocation())
+    }
+    var locationAudit by remember(existing?.idRecord) {
+        mutableStateOf<LocationAuditResult?>(null)
+    }
+    var jenisObjek by rememberSaveable(existing?.idRecord) {
+        mutableStateOf(existing?.jenisObjek?.ifBlank { JenisObjek.KELUARGA } ?: JenisObjek.KELUARGA)
+    }
+    var namaObjek by rememberSaveable(existing?.idRecord) {
+        mutableStateOf(existing?.namaObjek.orEmpty())
+    }
+    var alamat by rememberSaveable(existing?.idRecord) {
+        mutableStateOf(existing?.alamat.orEmpty())
+    }
+    var statusPendataan by rememberSaveable(existing?.idRecord) {
+        mutableStateOf(
+            existing?.statusPendataan?.takeIf {
+                it == StatusPendataan.LENGKAP || it == StatusPendataan.TIDAK_LENGKAP
+            } ?: StatusPendataan.LENGKAP
+        )
+    }
+    var catatan by rememberSaveable(existing?.idRecord) {
+        mutableStateOf(existing?.catatan.orEmpty())
+    }
     var photos by remember { mutableStateOf<List<File>>(emptyList()) }
     var showCamera by rememberSaveable { mutableStateOf(false) }
     var showLocationRationale by rememberSaveable { mutableStateOf(false) }
@@ -112,13 +159,22 @@ fun PendataanFormScreen(
     val locationChecker = remember { LocationIntegrityChecker() }
     val context = LocalContext.current
 
+    LaunchedEffect(wilayah, existing?.idRecord) {
+        if (selection.sls == null && initialSelection.sls != null) {
+            selection = initialSelection
+        }
+        capturedLocation?.let { location ->
+            locationAudit = locationChecker.inspect(location)
+        }
+    }
+
     val isCompleteEnough = selection.sls != null &&
         capturedLocation != null &&
         jenisObjek.isNotBlank() &&
         namaObjek.isNotBlank() &&
         (statusPendataan != StatusPendataan.TIDAK_LENGKAP ||
             catatan.isNotBlank()) &&
-        photos.isNotEmpty()
+        (photos.isNotEmpty() || existing != null)
 
     fun makeSubmission(asDraft: Boolean): PendataanFormSubmission {
         val location = capturedLocation
@@ -133,15 +189,20 @@ fun PendataanFormScreen(
             latitude = location?.latitude,
             longitude = location?.longitude,
             accuracyM = location?.accuracyM,
-            isMock = locationAudit?.isMock == true,
+            isMock = locationAudit?.isMock == true || existing?.isMock == true,
             waktuPendataan = location?.capturedAtEpochMillis,
             photoFiles = photos,
             simpanSebagaiDraf = asDraft,
-            versiApp = "0.1.0"
+            versiApp = "0.1.0",
+            existingRecordId = existing?.idRecord
         )
     }
 
     fun save(asDraft: Boolean) {
+        if (asDraft && existing?.statusKirim == SyncStatus.TERKIRIM) {
+            errorMessage = "Record sudah terkirim. Gunakan tombol kirim ulang untuk menyimpan perubahan."
+            return
+        }
         if (!asDraft && !isCompleteEnough) {
             errorMessage = validationMessage(
                 selection = selection,
@@ -149,7 +210,7 @@ fun PendataanFormScreen(
                 namaObjek = namaObjek,
                 statusPendataan = statusPendataan,
                 catatan = catatan,
-                photoCount = photos.size
+                photoCount = if (photos.isNotEmpty()) photos.size else if (existing != null) 1 else 0
             )
             return
         }
@@ -367,7 +428,7 @@ fun PendataanFormScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text("Tambah Pendataan")
+                        Text(if (existing == null) "Tambah Pendataan" else "Edit Pendataan")
                         Text(
                             text = "Form lapangan SE2026",
                             style = MaterialTheme.typography.labelSmall,
@@ -410,13 +471,21 @@ fun PendataanFormScreen(
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "Form Pendataan Responden",
+                        text = if (existing == null) {
+                            "Form Pendataan Responden"
+                        } else {
+                            "Perbarui Pendataan Responden"
+                        },
                         style = MaterialTheme.typography.headlineSmall,
                         color = MaterialTheme.colorScheme.onPrimary,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "Lengkapi wilayah, lokasi, identitas objek, dan bukti foto.",
+                        text = if (existing == null) {
+                            "Lengkapi wilayah, lokasi, identitas objek, dan bukti foto."
+                        } else {
+                            "Perubahan akan disimpan aman di Room dan dikirim ulang bila perlu."
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.86f)
                     )
@@ -424,7 +493,7 @@ fun PendataanFormScreen(
             }
 
             FormWilayahSection(
-                wilayah = wilayah,
+                wilayah = formWilayah,
                 fixedKodeKabupaten = kodeKabupaten,
                 initialSelection = selection,
                 onSelectionChanged = {
@@ -597,20 +666,44 @@ fun PendataanFormScreen(
                 shape = MaterialTheme.shapes.medium,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(if (isSaving) "Menyimpan..." else "Simpan")
+                Text(
+                    if (isSaving) "Menyimpan..."
+                    else if (existing == null) "Simpan"
+                    else if (existing.statusKirim == SyncStatus.TERKIRIM) "Simpan & Kirim Ulang"
+                    else "Simpan Perubahan"
+                )
             }
-            OutlinedButton(
-                onClick = { save(asDraft = true) },
-                enabled = !isSaving && !isProcessingPhoto,
-                shape = MaterialTheme.shapes.medium,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Simpan sebagai Draf")
+            if (existing?.statusKirim != SyncStatus.TERKIRIM) {
+                OutlinedButton(
+                    onClick = { save(asDraft = true) },
+                    enabled = !isSaving && !isProcessingPhoto,
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Simpan sebagai Draf")
+                }
+            } else {
+                Text(
+                    text = "Record terkirim; perubahan akan menggantikan data server setelah antrean dikirim.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }
+
+private fun PendataanEntity.toWilayahEntity(): WilayahEntity = WilayahEntity(
+    kodeKab = kodeKab,
+    kabupaten = kabupaten,
+    kodeKec = kodeKec,
+    namaKec = namaKec,
+    kodeDesa = kodeDesa,
+    namaDesa = namaDesa,
+    kodeSls = kodeSls,
+    namaSls = namaSls
+)
 
 @Composable
 private fun FormSectionHeader(
@@ -757,7 +850,8 @@ private fun FormChoiceDropdown(
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
-            modifier = Modifier.fillMaxWidth()
+            offset = DpOffset(0.dp, 4.dp),
+            modifier = Modifier.heightIn(max = 280.dp)
         ) {
             options.forEach { (display, value) ->
                 DropdownMenuItem(
@@ -840,5 +934,17 @@ private fun validationMessage(
 
 private fun formatCoordinate(value: Double): String =
     String.format(Locale.US, "%.6f", value)
+
+private fun PendataanEntity.toCapturedLocation(): CapturedLocation? {
+    val latitude = latitude ?: return null
+    val longitude = longitude ?: return null
+    return CapturedLocation(
+        latitude = latitude,
+        longitude = longitude,
+        accuracyM = akurasiM,
+        capturedAtEpochMillis = waktuPendataan ?: waktuDiubah,
+        isMock = isMock
+    )
+}
 
 private const val MAX_PHOTOS = 3
