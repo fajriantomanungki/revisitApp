@@ -19,8 +19,24 @@ gradle --no-daemon assembleDebug
 Jika memakai Google Maps, isi `MAPS_API_KEY` melalui `local.properties` atau
 property Gradle. Jangan commit key asli.
 
-Konfigurasi endpoint, token API, dan `id_petugas` disimpan melalui
-`SyncConfigStore` menggunakan `EncryptedSharedPreferences`.
+Konfigurasi endpoint Apps Script dan token API diatur satu kali pada file
+`local.properties` di root project. File ini diabaikan oleh Git:
+
+```properties
+APPS_SCRIPT_URL=https://script.google.com/macros/s/DEPLOYMENT_ID/exec
+APPS_SCRIPT_TOKEN=ISI_TOKEN_API_APPS_SCRIPT_DI_SINI
+MAPS_API_KEY=ISI_GOOGLE_MAPS_KEY_DI_SINI
+```
+
+Setelah konfigurasi tersebut tersedia dan aplikasi di-build ulang, layar login
+hanya meminta `id_petugas` dan PIN. URL serta token dimasukkan otomatis melalui
+`BuildConfig`, kemudian disimpan kembali secara terenkripsi melalui
+`SyncConfigStore`. Saat logout, hanya sesi petugas yang dihapus sehingga URL
+dan token tidak diminta lagi.
+
+Token yang digunakan pada aplikasi mobile tetap dapat diekstrak dari APK oleh
+pihak yang memiliki APK. Untuk MVP internal, batasi token dan pantau aksesnya;
+untuk produksi, gunakan token sesi per petugas.
 
 Jalur form F-04 menyimpan record dan foto watermark ke Room/internal storage
 lebih dahulu. CameraX hanya menulis file sementara di `cacheDir`; file itu

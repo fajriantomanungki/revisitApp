@@ -25,19 +25,15 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 data class LoginCredentials(
-    val endpointUrl: String,
-    val token: String,
     val idPetugas: String,
     val pin: String
 )
 
-/** Login online F-01. PIN hanya dikirim ke Apps Script melalui HTTPS. */
+/** Login online/offline F-01. Konfigurasi server diambil dari aplikasi. */
 @Composable
 fun LoginScreen(
     onLogin: suspend (LoginCredentials) -> Result<String>
 ) {
-    var endpointUrl by rememberSaveable { mutableStateOf("") }
-    var token by rememberSaveable { mutableStateOf("") }
     var idPetugas by rememberSaveable { mutableStateOf("") }
     var pin by rememberSaveable { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
@@ -46,10 +42,8 @@ fun LoginScreen(
     val scope = rememberCoroutineScope()
 
     fun submit() {
-        if (endpointUrl.isBlank() || token.isBlank() ||
-            idPetugas.isBlank() || pin.isBlank()
-        ) {
-            errorMessage = "Endpoint, token, kode petugas, dan PIN wajib diisi."
+        if (idPetugas.isBlank() || pin.isBlank()) {
+            errorMessage = "Kode petugas dan PIN wajib diisi."
             return
         }
         isLoading = true
@@ -59,8 +53,6 @@ fun LoginScreen(
             val result = try {
                 onLogin(
                     LoginCredentials(
-                        endpointUrl = endpointUrl.trim(),
-                        token = token.trim(),
                         idPetugas = idPetugas.trim(),
                         pin = pin
                     )
@@ -91,24 +83,8 @@ fun LoginScreen(
             style = MaterialTheme.typography.headlineMedium
         )
         Text(
-            text = "Login petugas. Setelah login berhasil, identitas dan PIN " +
-                "disimpan secara aman untuk penggunaan offline."
-        )
-        OutlinedTextField(
-            value = endpointUrl,
-            onValueChange = { endpointUrl = it },
-            label = { Text("URL Apps Script /exec") },
-            supportingText = { Text("Wajib HTTPS") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-            value = token,
-            onValueChange = { token = it },
-            label = { Text("Token API") },
-            visualTransformation = PasswordVisualTransformation(),
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
+            text = "Masukkan kode petugas dan PIN. Konfigurasi server " +
+                "diatur oleh aplikasi dan tidak perlu dimasukkan setiap login."
         )
         OutlinedTextField(
             value = idPetugas,

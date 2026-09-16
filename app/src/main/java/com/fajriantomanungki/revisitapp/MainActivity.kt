@@ -88,27 +88,38 @@ class MainActivity : ComponentActivity() {
 
                 if (activeConfig == null) {
                     LoginScreen { credentials ->
-                        val config = SyncConfig(
-                            endpointUrl = credentials.endpointUrl,
-                            token = credentials.token,
-                            idPetugas = credentials.idPetugas
-                        )
-                        runCatching {
-                            val response = appsScriptApi.login(
-                                config = config,
-                                idPetugas = credentials.idPetugas,
-                                pin = credentials.pin
+                        val serverConfig = syncConfigStore.readServerConfig()
+                        if (serverConfig == null) {
+                            Result.failure<String>(
+                                IllegalStateException(
+                                    "Konfigurasi server belum tersedia. Tambahkan " +
+                                        "APPS_SCRIPT_URL dan APPS_SCRIPT_TOKEN pada " +
+                                        "local.properties, lalu build ulang aplikasi."
+                                )
                             )
-                            syncConfigStore.saveAuthenticated(
-                                endpointUrl = credentials.endpointUrl,
-                                token = credentials.token,
-                                idPetugas = response.idPetugas,
-                                nama = response.nama,
-                                pin = credentials.pin
+                        } else {
+                            val config = SyncConfig(
+                                endpointUrl = serverConfig.endpointUrl,
+                                token = serverConfig.token,
+                                idPetugas = credentials.idPetugas
                             )
-                            activeConfig = syncConfigStore.read()
-                                ?: error("Sesi berhasil tetapi gagal disimpan")
-                            "Login berhasil${response.nama.takeIf { it.isNotBlank() }?.let { ", $it" }.orEmpty()}."
+                            runCatching {
+                                val response = appsScriptApi.login(
+                                    config = config,
+                                    idPetugas = credentials.idPetugas,
+                                    pin = credentials.pin
+                                )
+                                syncConfigStore.saveAuthenticated(
+                                    endpointUrl = serverConfig.endpointUrl,
+                                    token = serverConfig.token,
+                                    idPetugas = response.idPetugas,
+                                    nama = response.nama,
+                                    pin = credentials.pin
+                                )
+                                activeConfig = syncConfigStore.read()
+                                    ?: error("Sesi berhasil tetapi gagal disimpan")
+                                "Login berhasil${response.nama.takeIf { it.isNotBlank() }?.let { ", $it" }.orEmpty()}."
+                            }
                         }
                     }
                 } else {
@@ -193,7 +204,7 @@ class MainActivity : ComponentActivity() {
                         },
                         onLogout = {
                             logoutGuard.logoutIfAllowed(idPetugas) {
-                                syncConfigStore.clear()
+                                syncConfigStore.clearSession()
                                 activeConfig = null
                             }
                         },

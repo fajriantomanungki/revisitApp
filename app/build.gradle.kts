@@ -14,6 +14,19 @@ if (localPropertiesFile.isFile) {
     localPropertiesFile.inputStream().use { localProperties.load(it) }
 }
 
+fun String.toBuildConfigString(): String =
+    "\"${replace("\\", "\\\\").replace("\"", "\\\"")}\""
+
+val appsScriptUrl = project.findProperty("APPS_SCRIPT_URL")?.toString()
+    ?.trim()
+    ?.takeIf { it.isNotBlank() }
+    ?: localProperties.getProperty("APPS_SCRIPT_URL").orEmpty().trim()
+
+val appsScriptToken = project.findProperty("APPS_SCRIPT_TOKEN")?.toString()
+    ?.trim()
+    ?.takeIf { it.isNotBlank() }
+    ?: localProperties.getProperty("APPS_SCRIPT_TOKEN").orEmpty().trim()
+
 android {
     namespace = "com.fajriantomanungki.revisitapp"
     compileSdk = 35
@@ -34,6 +47,9 @@ android {
             project.findProperty("MAPS_API_KEY")?.toString()
                 ?.takeIf { it.isNotBlank() }
                 ?: localProperties.getProperty("MAPS_API_KEY").orEmpty()
+
+        buildConfigField("String", "APPS_SCRIPT_URL", appsScriptUrl.toBuildConfigString())
+        buildConfigField("String", "APPS_SCRIPT_TOKEN", appsScriptToken.toBuildConfigString())
     }
 
     buildTypes {
@@ -57,6 +73,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {

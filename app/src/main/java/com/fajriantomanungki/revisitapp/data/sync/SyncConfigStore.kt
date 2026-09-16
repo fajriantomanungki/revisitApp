@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.net.Uri
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.fajriantomanungki.revisitapp.BuildConfig
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -16,15 +17,21 @@ data class SyncConfig(
     val idPetugas: String
 )
 
+data class SyncServerConfig(
+    val endpointUrl: String,
+    val token: String
+)
+
 data class CachedIdentity(
     val idPetugas: String,
     val nama: String
 )
 
 /**
- * Menyimpan konfigurasi sinkronisasi. Token tidak dimasukkan ke input
- * WorkRequest karena Data WorkManager bersifat persisten; token hanya dibaca
- * saat worker berjalan dari EncryptedSharedPreferences.
+ * Menyimpan konfigurasi sinkronisasi. URL dan token dibaca dari BuildConfig
+ * yang dibuat saat build dari local.properties, lalu disalin ke
+ * EncryptedSharedPreferences setelah login. Token tidak dimasukkan ke input
+ * WorkRequest karena Data WorkManager bersifat persisten.
  */
 class SyncConfigStore @Inject constructor(
     @ApplicationContext context: Context
@@ -82,6 +89,36 @@ class SyncConfigStore @Inject constructor(
             .apply()
     }
 
+    /**
+     * Mengambil konfigurasi server tanpa memerlukan identitas petugas.
+     * Nilai tersimpan diprioritaskan agar konfigurasi lama tetap kompatibel;
+     * jika belum ada, gunakan nilai dari BuildConfig.
+     */
+    fun readServerConfig(): SyncServerConfig? {
+        val endpointUrl = preferences.getString(KEY_ENDPOINT_URL, null)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: BuildConfig.APPS_SCRIPT_URL.trim()
+                .takeIf { it.isNotEmpty() }
+        val token = preferences.getString(KEY_TOKEN, null)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: BuildConfig.APPS_SCRIPT_TOKEN.trim()
+                .takeIf { it.isNotEmpty() }
+
+        if (endpointUrl == null || token == null) return null
+
+        val normalizedEndpoint = endpointUrl.removeSuffix("/")
+        if (!Uri.parse(normalizedEndpoint).scheme.equals("https", ignoreCase = true)) {
+            return null
+        }
+
+        return SyncServerConfig(
+            endpointUrl = normalizedEndpoint,
+            token = token
+        )
+    }
+
     fun readCachedIdentity(): CachedIdentity? {
         val idPetugas = preferences.getString(KEY_ID_PETUGAS, null)
             ?.trim()
@@ -109,26 +146,29 @@ class SyncConfigStore @Inject constructor(
     }
 
     fun read(): SyncConfig? {
-        val endpointUrl = preferences.getString(KEY_ENDPOINT_URL, null)
-            ?.trim()
-            ?.takeIf { it.isNotEmpty() }
-            ?: return null
-        val token = preferences.getString(KEY_TOKEN, null)
-            ?.trim()
-            ?.takeIf { it.isNotEmpty() }
-            ?: return null
+        val serverConfig = readServerConfig() ?: return null
         val idPetugas = preferences.getString(KEY_ID_PETUGAS, null)
             ?.trim()
             ?.takeIf { it.isNotEmpty() }
             ?: return null
 
         return SyncConfig(
-            endpointUrl = endpointUrl,
-            token = token,
+            endpointUrl = serverConfig.endpointUrl,
+            token = serverConfig.token,
             idPetugas = idPetugas
         )
     }
 
+    /** Menghapus sesi petugas, tetapi mempertahankan URL dan token server. */
+    fun clearSession() {
+        preferences.edit()
+            .remove(KEY_ID_PETUGAS)
+            .remove(KEY_NAMA)
+            .remove(KEY_PIN_DIGEST)
+            .apply()
+    }
+
+    /** Menghapus seluruh konfigurasi, termasuk konfigurasi server. */
     fun clear() {
         preferences.edit().clear().apply()
     }
