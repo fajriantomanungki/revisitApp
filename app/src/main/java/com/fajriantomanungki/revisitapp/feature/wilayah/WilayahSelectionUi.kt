@@ -29,9 +29,10 @@ import com.fajriantomanungki.revisitapp.data.local.entity.WilayahEntity
  * Nilai pilihan wilayah yang dikirimkan ke form pendataan.
  *
  * Setiap level menggunakan WilayahEntity yang sama karena satu baris master
- * sudah memuat hierarki kecamatan, desa, dan SLS secara lengkap.
+ * sudah memuat hierarki kabupaten, kecamatan, desa, dan SLS secara lengkap.
  */
 data class WilayahSelection(
+    val kabupaten: WilayahEntity? = null,
     val kecamatan: WilayahEntity? = null,
     val desa: WilayahEntity? = null,
     val sls: WilayahEntity? = null
@@ -49,7 +50,7 @@ private data class WilayahOption(
  * Selector reusable untuk F-02 dan F-04.1.
  *
  * Urutan filter:
- *   Kecamatan -> Desa -> SLS
+ *   Kabupaten -> Kecamatan -> Desa -> SLS
  *
  * Dropdown kode mendukung pencarian berdasarkan kode maupun nama.
  * Nama wilayah ditampilkan pada field terpisah yang read-only.
@@ -61,6 +62,9 @@ fun CascadingWilayahSelector(
     initialSelection: WilayahSelection = WilayahSelection(),
     onSelectionChanged: (WilayahSelection) -> Unit
 ) {
+    var selectedKodeKab by rememberSaveable {
+        mutableStateOf(initialSelection.kabupaten?.kodeKab)
+    }
     var selectedKodeKec by rememberSaveable {
         mutableStateOf(initialSelection.kecamatan?.kodeKec)
     }
@@ -71,46 +75,71 @@ fun CascadingWilayahSelector(
         mutableStateOf(initialSelection.sls?.kodeSls)
     }
 
+    var queryKab by rememberSaveable { mutableStateOf("") }
     var queryKec by rememberSaveable { mutableStateOf("") }
     var queryDesa by rememberSaveable { mutableStateOf("") }
     var querySls by rememberSaveable { mutableStateOf("") }
 
     LaunchedEffect(
+        initialSelection.kabupaten?.kodeKab,
         initialSelection.kecamatan?.kodeKec,
         initialSelection.desa?.kodeDesa,
         initialSelection.sls?.kodeSls
     ) {
+        selectedKodeKab = initialSelection.kabupaten?.kodeKab
         selectedKodeKec = initialSelection.kecamatan?.kodeKec
         selectedKodeDesa = initialSelection.desa?.kodeDesa
         selectedKodeSls = initialSelection.sls?.kodeSls
     }
 
+    val hasKabupaten = remember(wilayah) {
+        wilayah.any { it.kodeKab.isNotBlank() }
+    }
+
+    val selectedKabupaten = remember(
+        wilayah,
+        selectedKodeKab
+    ) {
+        wilayah.firstOrNull { it.kodeKab == selectedKodeKab }
+    }
+
     val selectedKecamatan = remember(
         wilayah,
+        hasKabupaten,
+        selectedKodeKab,
         selectedKodeKec
     ) {
-        wilayah.firstOrNull { it.kodeKec == selectedKodeKec }
+        wilayah.firstOrNull {
+            (!hasKabupaten || it.kodeKab == selectedKodeKab) &&
+                it.kodeKec == selectedKodeKec
+        }
     }
 
     val selectedDesa = remember(
         wilayah,
+        hasKabupaten,
+        selectedKodeKab,
         selectedKodeKec,
         selectedKodeDesa
     ) {
         wilayah.firstOrNull {
-            it.kodeKec == selectedKodeKec &&
+            (!hasKabupaten || it.kodeKab == selectedKodeKab) &&
+                it.kodeKec == selectedKodeKec &&
                 it.kodeDesa == selectedKodeDesa
         }
     }
 
     val selectedSls = remember(
         wilayah,
+        hasKabupaten,
+        selectedKodeKab,
         selectedKodeKec,
         selectedKodeDesa,
         selectedKodeSls
     ) {
         wilayah.firstOrNull {
-            it.kodeKec == selectedKodeKec &&
+            (!hasKabupaten || it.kodeKab == selectedKodeKab) &&
+                it.kodeKec == selectedKodeKec &&
                 it.kodeDesa == selectedKodeDesa &&
                 it.kodeSls == selectedKodeSls
         }
@@ -123,7 +152,12 @@ fun CascadingWilayahSelector(
      */
     LaunchedEffect(wilayah) {
         if (wilayah.isNotEmpty()) {
-            if (selectedKodeKec != null && selectedKecamatan == null) {
+            if (hasKabupaten && selectedKodeKab != null && selectedKabupaten == null) {
+                selectedKodeKab = null
+                selectedKodeKec = null
+                selectedKodeDesa = null
+                selectedKodeSls = null
+            } else if (selectedKodeKec != null && selectedKecamatan == null) {
                 selectedKodeKec = null
                 selectedKodeDesa = null
                 selectedKodeSls = null
@@ -139,6 +173,8 @@ fun CascadingWilayahSelector(
     val callback by rememberUpdatedState(onSelectionChanged)
     LaunchedEffect(
         wilayah,
+        hasKabupaten,
+        selectedKodeKab,
         selectedKodeKec,
         selectedKodeDesa,
         selectedKodeSls
@@ -146,6 +182,7 @@ fun CascadingWilayahSelector(
         if (wilayah.isNotEmpty()) {
             callback(
                 WilayahSelection(
+                    kabupaten = if (hasKabupaten) selectedKabupaten else null,
                     kecamatan = selectedKecamatan,
                     desa = selectedDesa,
                     sls = selectedSls
@@ -154,12 +191,30 @@ fun CascadingWilayahSelector(
         }
     }
 
-    val kecamatanOptions = remember(wilayah, queryKec) {
+    val kabupatenOptions = remember(wilayah, queryKab) {
+        wilayah
+            .filter { it.kodeKab.isNotBlank() }
+            .distinctBy { it.kodeKab }
+            .filter {
+                it.kodeKab.contains(queryKab, ignoreCase = true) ||
+                    it.kabupaten.contains(queryKab, ignoreCase = true)
+            }
+            .sortedBy { it.kabupaten.lowercase() }
+            .map { WilayahOption(it.kodeKab, it.kabupaten) }
+    }
+
+    val kecamatanOptions = remember(
+        wilayah,
+        hasKabupaten,
+        selectedKodeKab,
+        queryKec
+    ) {
         wilayah
             .distinctBy { it.kodeKec }
             .filter {
-                it.kodeKec.contains(queryKec, ignoreCase = true) ||
-                    it.namaKec.contains(queryKec, ignoreCase = true)
+                (!hasKabupaten || it.kodeKab == selectedKodeKab) &&
+                    (it.kodeKec.contains(queryKec, ignoreCase = true) ||
+                        it.namaKec.contains(queryKec, ignoreCase = true))
             }
             .sortedBy { it.namaKec.lowercase() }
             .map { WilayahOption(it.kodeKec, it.namaKec) }
@@ -167,11 +222,16 @@ fun CascadingWilayahSelector(
 
     val desaOptions = remember(
         wilayah,
+        hasKabupaten,
+        selectedKodeKab,
         selectedKodeKec,
         queryDesa
     ) {
         wilayah
-            .filter { it.kodeKec == selectedKodeKec }
+            .filter {
+                (!hasKabupaten || it.kodeKab == selectedKodeKab) &&
+                    it.kodeKec == selectedKodeKec
+            }
             .distinctBy { it.kodeDesa }
             .filter {
                 it.kodeDesa.contains(queryDesa, ignoreCase = true) ||
@@ -183,13 +243,16 @@ fun CascadingWilayahSelector(
 
     val slsOptions = remember(
         wilayah,
+        hasKabupaten,
+        selectedKodeKab,
         selectedKodeKec,
         selectedKodeDesa,
         querySls
     ) {
         wilayah
             .filter {
-                it.kodeKec == selectedKodeKec &&
+                (!hasKabupaten || it.kodeKab == selectedKodeKab) &&
+                    it.kodeKec == selectedKodeKec &&
                     it.kodeDesa == selectedKodeDesa
             }
             .filter {
@@ -204,12 +267,40 @@ fun CascadingWilayahSelector(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        if (hasKabupaten) {
+            WilayahDropdown(
+                label = "Kode Kabupaten",
+                selectedCode = selectedKodeKab,
+                query = queryKab,
+                options = kabupatenOptions,
+                enabled = kabupatenOptions.isNotEmpty() || selectedKabupaten != null,
+                onQueryChanged = { queryKab = it },
+                onSelected = { option ->
+                    selectedKodeKab = option.code
+                    selectedKodeKec = null
+                    selectedKodeDesa = null
+                    selectedKodeSls = null
+                    queryKab = option.code
+                    queryKec = ""
+                    queryDesa = ""
+                    querySls = ""
+                }
+            )
+
+            ReadOnlyRegionNameField(
+                label = "Nama Kabupaten",
+                value = selectedKabupaten?.kabupaten.orEmpty(),
+                enabled = selectedKabupaten != null
+            )
+        }
+
         WilayahDropdown(
             label = "Kode Kecamatan",
             selectedCode = selectedKodeKec,
             query = queryKec,
             options = kecamatanOptions,
-            enabled = kecamatanOptions.isNotEmpty() || selectedKecamatan != null,
+            enabled = (!hasKabupaten || selectedKabupaten != null) &&
+                (kecamatanOptions.isNotEmpty() || selectedKecamatan != null),
             onQueryChanged = { queryKec = it },
             onSelected = { option ->
                 selectedKodeKec = option.code

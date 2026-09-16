@@ -12,30 +12,37 @@ import androidx.room.PrimaryKey
 @Entity(
     tableName = "wilayah",
     indices = [
+        Index(value = ["kode_kab"]),
         Index(value = ["kode_kec"]),
         Index(value = ["kode_desa"]),
         Index(value = ["versi_master"])
     ]
 )
 data class WilayahEntity(
+    @ColumnInfo(name = "kode_kab", defaultValue = "''")
+    val kodeKab: String = "",
+
+    @ColumnInfo(name = "kabupaten", defaultValue = "''")
+    val kabupaten: String = "",
+
     @ColumnInfo(name = "kode_kec")
-    val kodeKec: String,
+    val kodeKec: String = "",
 
     @ColumnInfo(name = "nama_kec")
-    val namaKec: String,
+    val namaKec: String = "",
 
     @ColumnInfo(name = "kode_desa")
-    val kodeDesa: String,
+    val kodeDesa: String = "",
 
     @ColumnInfo(name = "nama_desa")
-    val namaDesa: String,
+    val namaDesa: String = "",
 
     @PrimaryKey
     @ColumnInfo(name = "kode_sls")
-    val kodeSls: String,
+    val kodeSls: String = "",
 
     @ColumnInfo(name = "nama_sls")
-    val namaSls: String,
+    val namaSls: String = "",
 
     @ColumnInfo(name = "target_responden")
     val targetResponden: Int = 0,

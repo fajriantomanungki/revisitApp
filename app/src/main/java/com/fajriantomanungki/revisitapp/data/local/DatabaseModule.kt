@@ -32,7 +32,7 @@ object DatabaseModule {
             context,
             AppDatabase::class.java,
             AppDatabase.DATABASE_NAME
-        ).build()
+        ).addMigrations(AppDatabase.MIGRATION_1_2).build()
     }
 
     @Provides

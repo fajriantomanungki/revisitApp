@@ -37,6 +37,8 @@ data class RemoteSyncResponse(
 )
 
 data class RemoteWilayahRow(
+    val kodeKab: String,
+    val kabupaten: String,
     val kodeKec: String,
     val namaKec: String,
     val kodeDesa: String,
@@ -167,6 +169,8 @@ class AppsScriptApi @Inject constructor() {
                 )
             }
             rows += RemoteWilayahRow(
+                kodeKab = item.optString("kode_kab", "").trim(),
+                kabupaten = item.optString("kabupaten", "").trim(),
                 kodeKec = item.optString("kode_kec", "").trim(),
                 namaKec = item.optString("nama_kec", "").trim(),
                 kodeDesa = item.optString("kode_desa", "").trim(),

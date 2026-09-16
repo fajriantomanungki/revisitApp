@@ -55,5 +55,18 @@ hanya digest SHA-256 terenkripsi untuk validasi login offline.
 4. Isi sheet `petugas` dan `master_wilayah` sesuai header yang dibuat.
 5. Deploy sebagai Web App dengan akses sesuai kebutuhan operasional.
 
+Header `master_wilayah` wajib memuat hierarki berikut:
+
+```text
+kode_kab, kabupaten, kode_kec, nama_kec, kode_desa, nama_desa,
+kode_sls, nama_sls, target_responden, lat_centroid, lon_centroid, versi_master
+```
+
+Simpan seluruh kode wilayah sebagai teks agar angka nol di depan tidak hilang.
+Setelah menambah atau mengubah master, naikkan nilai `versi_master` agar
+perangkat yang sudah memiliki cache mengetahui bahwa master perlu diunduh ulang.
+Versi aplikasi yang sudah memiliki database Room lama akan melakukan migration
+otomatis untuk menambahkan kolom Kabupaten tanpa menghapus data lokal.
+
 Build Android di GitHub Actions dijalankan pada setiap push ke `main` dan pull
 request.

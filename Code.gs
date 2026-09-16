@@ -57,6 +57,8 @@ var SHEET_HEADERS = {
     'aktif'
   ],
   MASTER_WILAYAH: [
+    'kode_kab',
+    'kabupaten',
     'kode_kec',
     'nama_kec',
     'kode_desa',
@@ -1340,6 +1342,8 @@ function getMasterRecords_() {
 
   records.forEach(function(row) {
     var normalized = {
+      kode_kab: toText_(row.kode_kab),
+      kabupaten: toText_(row.kabupaten),
       kode_kec: toText_(row.kode_kec),
       nama_kec: toText_(row.nama_kec),
       kode_desa: toText_(row.kode_desa),
@@ -1396,6 +1400,8 @@ function getMasterVersion_(masterRows) {
 
 function masterToApiRecord_(master) {
   return {
+    kode_kab: master.kode_kab,
+    kabupaten: master.kabupaten,
     kode_kec: master.kode_kec,
     nama_kec: master.nama_kec,
     kode_desa: master.kode_desa,

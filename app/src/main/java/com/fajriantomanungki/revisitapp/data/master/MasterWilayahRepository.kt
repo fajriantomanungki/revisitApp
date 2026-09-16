@@ -41,6 +41,8 @@ class MasterWilayahRepository @Inject constructor(
 
         val rows = response.rows.map { row ->
             WilayahEntity(
+                kodeKab = row.kodeKab,
+                kabupaten = row.kabupaten,
                 kodeKec = row.kodeKec,
                 namaKec = row.namaKec,
                 kodeDesa = row.kodeDesa,
