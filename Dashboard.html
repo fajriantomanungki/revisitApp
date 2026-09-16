@@ -1,0 +1,1600 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard Pendataan Lapangan</title>
+  <style>
+    :root {
+      --navy: #0b3558;
+      --navy-dark: #07233b;
+      --teal: #0d9488;
+      --teal-soft: #ccfbf1;
+      --amber: #f59e0b;
+      --red-dark: #991b1b;
+      --red-soft: #fee2e2;
+      --green: #16a34a;
+      --green-dark: #166534;
+      --green-soft: #dcfce7;
+      --ink: #172033;
+      --muted: #64748b;
+      --line: #e2e8f0;
+      --surface: #ffffff;
+      --canvas: #f4f7fb;
+      --shadow: 0 14px 34px rgba(11, 53, 88, .09);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 100% 0%, rgba(13, 148, 136, .12), transparent 28rem),
+        var(--canvas);
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .app-shell {
+      min-height: 100vh;
+    }
+
+    .topbar {
+      min-height: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 28px;
+      color: #fff;
+      background: linear-gradient(115deg, var(--navy-dark), var(--navy));
+      box-shadow: 0 8px 22px rgba(7, 35, 59, .18);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-mark {
+      width: 42px;
+      height: 42px;
+      display: grid;
+      place-items: center;
+      border-radius: 13px;
+      color: var(--navy);
+      background: linear-gradient(145deg, #fbbf24, #fde68a);
+      font-size: 18px;
+      font-weight: 800;
+    }
+
+    .brand-title {
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: .02em;
+    }
+
+    .brand-subtitle {
+      margin: 4px 0 0;
+      color: #cbd5e1;
+      font-size: 12px;
+    }
+
+    .topbar-meta {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      color: #dbeafe;
+      font-size: 12px;
+      text-align: right;
+    }
+
+    .status-dot {
+      width: 9px;
+      height: 9px;
+      display: inline-block;
+      margin-right: 6px;
+      border-radius: 50%;
+      background: #4ade80;
+      box-shadow: 0 0 0 4px rgba(74, 222, 128, .16);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 248px minmax(0, 1fr);
+      min-height: calc(100vh - 72px);
+    }
+
+    .sidebar {
+      padding: 24px 16px;
+      border-right: 1px solid rgba(148, 163, 184, .2);
+      background: rgba(255, 255, 255, .78);
+    }
+
+    .nav-label {
+      padding: 8px 14px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .nav-button {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 4px 0;
+      padding: 12px 14px;
+      border: 0;
+      border-radius: 12px;
+      color: #475569;
+      background: transparent;
+      text-align: left;
+      transition: .18s ease;
+    }
+
+    .nav-button:hover {
+      color: var(--navy);
+      background: #eaf2f8;
+    }
+
+    .nav-button.active {
+      color: #fff;
+      background: linear-gradient(110deg, var(--navy), #155e75);
+      box-shadow: 0 8px 16px rgba(11, 53, 88, .18);
+    }
+
+    .main {
+      width: 100%;
+      max-width: 1680px;
+      padding: 28px;
+    }
+
+    .page-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 22px;
+    }
+
+    .eyebrow {
+      margin: 0 0 6px;
+      color: var(--teal);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      color: var(--navy);
+    }
+
+    h1 {
+      font-size: clamp(24px, 3vw, 34px);
+    }
+
+    h2 {
+      font-size: 18px;
+    }
+
+    h3 {
+      font-size: 14px;
+    }
+
+    .page-description {
+      max-width: 780px;
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .panel {
+      display: none;
+    }
+
+    .panel.active {
+      display: block;
+      animation: fade-in .2s ease;
+    }
+
+    @keyframes fade-in {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .toolbar,
+    .card,
+    .form-card,
+    .table-card,
+    .report-card {
+      border: 1px solid rgba(226, 232, 240, .92);
+      border-radius: 18px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+      gap: 12px;
+      align-items: end;
+      margin-bottom: 18px;
+      padding: 16px;
+    }
+
+    .field {
+      min-width: 0;
+    }
+
+    .field label {
+      display: block;
+      margin-bottom: 6px;
+      color: #475569;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .field input,
+    .field select,
+    .field textarea {
+      width: 100%;
+      min-height: 42px;
+      padding: 10px 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      color: var(--ink);
+      background: #fff;
+      outline: none;
+      transition: border-color .18s ease, box-shadow .18s ease;
+    }
+
+    .field textarea {
+      min-height: 170px;
+      resize: vertical;
+      font-family: Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .field input:focus,
+    .field select:focus,
+    .field textarea:focus {
+      border-color: var(--teal);
+      box-shadow: 0 0 0 3px rgba(13, 148, 136, .13);
+    }
+
+    .button {
+      min-height: 42px;
+      padding: 10px 16px;
+      border: 0;
+      border-radius: 10px;
+      color: #fff;
+      background: var(--navy);
+      font-weight: 700;
+      transition: transform .18s ease, box-shadow .18s ease, background .18s ease;
+    }
+
+    .button:hover {
+      background: #124d79;
+      box-shadow: 0 8px 16px rgba(11, 53, 88, .18);
+      transform: translateY(-1px);
+    }
+
+    .button.secondary {
+      color: var(--navy);
+      border: 1px solid #bfdbfe;
+      background: #eff6ff;
+    }
+
+    .button.teal {
+      background: var(--teal);
+    }
+
+    .button.amber {
+      color: #422006;
+      background: #fbbf24;
+    }
+
+    .button.small {
+      min-height: 34px;
+      padding: 7px 10px;
+      font-size: 12px;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+
+    .summary-card {
+      position: relative;
+      overflow: hidden;
+      padding: 18px;
+      border: 1px solid rgba(226, 232, 240, .9);
+      border-radius: 16px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .summary-card::after {
+      position: absolute;
+      right: -20px;
+      bottom: -30px;
+      width: 90px;
+      height: 90px;
+      border-radius: 50%;
+      background: rgba(13, 148, 136, .08);
+      content: '';
+    }
+
+    .summary-label {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .summary-value {
+      margin-top: 8px;
+      color: var(--navy);
+      font-size: 25px;
+      font-weight: 800;
+    }
+
+    .summary-hint {
+      margin-top: 5px;
+      color: #94a3b8;
+      font-size: 11px;
+    }
+
+    .two-columns {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    .card-head,
+    .table-head,
+    .form-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 18px 18px 12px;
+    }
+
+    .card-head p,
+    .table-head p,
+    .form-head p {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .table-wrap {
+      width: 100%;
+      overflow-x: auto;
+      padding: 0 18px 18px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    th {
+      padding: 11px 9px;
+      border-bottom: 2px solid #cbd5e1;
+      color: #475569;
+      background: #f8fafc;
+      font-size: 10px;
+      letter-spacing: .03em;
+      text-align: left;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    td {
+      padding: 11px 9px;
+      border-bottom: 1px solid #eef2f7;
+      vertical-align: middle;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .progress-cell {
+      min-width: 150px;
+    }
+
+    .progress-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .progress {
+      width: 100%;
+      height: 8px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e2e8f0;
+    }
+
+    .progress span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--teal);
+    }
+
+    .progress-label {
+      min-width: 53px;
+      color: #334155;
+      font-size: 11px;
+      font-weight: 800;
+      text-align: right;
+    }
+
+    .coverage-red-dark .progress span { background: var(--red-dark); }
+    .coverage-orange .progress span { background: #ea580c; }
+    .coverage-yellow .progress span { background: #ca8a04; }
+    .coverage-green .progress span { background: var(--green); }
+    .coverage-green-dark .progress span { background: var(--green-dark); }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .pill.active,
+    .pill.ok {
+      color: var(--green-dark);
+      background: var(--green-soft);
+    }
+
+    .pill.inactive,
+    .pill.warning {
+      color: #92400e;
+      background: #fef3c7;
+    }
+
+    .pill.audit {
+      color: var(--red-dark);
+      background: var(--red-soft);
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+      padding: 0 18px 18px;
+    }
+
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    .dot-red { background: var(--red-dark); }
+    .dot-orange { background: #ea580c; }
+    .dot-yellow { background: #ca8a04; }
+    .dot-green { background: var(--green); }
+    .dot-green-dark { background: var(--green-dark); }
+
+    .form-card,
+    .report-card {
+      margin-bottom: 18px;
+      padding-bottom: 18px;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      padding: 0 18px;
+    }
+
+    .form-grid .wide {
+      grid-column: 1 / -1;
+    }
+
+    .checkbox-field {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 42px;
+      color: #475569;
+      font-size: 12px;
+    }
+
+    .checkbox-field input {
+      width: 17px;
+      height: 17px;
+      accent-color: var(--teal);
+    }
+
+    .form-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding: 16px 18px 0;
+    }
+
+    .help {
+      margin: 9px 0 0;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .empty {
+      padding: 28px 12px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .loading {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .loading.visible {
+      display: inline-flex;
+    }
+
+    .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid #cbd5e1;
+      border-top-color: var(--teal);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .toast {
+      position: fixed;
+      right: 24px;
+      bottom: 24px;
+      z-index: 10;
+      max-width: min(420px, calc(100vw - 48px));
+      display: none;
+      padding: 13px 16px;
+      border: 1px solid #bbf7d0;
+      border-radius: 12px;
+      color: #14532d;
+      background: #f0fdf4;
+      box-shadow: var(--shadow);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .toast.visible {
+      display: block;
+    }
+
+    .toast.error {
+      border-color: #fecaca;
+      color: #7f1d1d;
+      background: #fef2f2;
+    }
+
+    .report-result {
+      display: none;
+      margin: 0 18px;
+      padding: 13px 15px;
+      border: 1px solid #99f6e4;
+      border-radius: 12px;
+      color: #134e4a;
+      background: #f0fdfa;
+      font-size: 12px;
+    }
+
+    .report-result.visible {
+      display: block;
+    }
+
+    .report-result a {
+      display: inline-block;
+      margin-top: 7px;
+      color: var(--navy);
+      font-weight: 800;
+    }
+
+    .stat-note {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    @media (max-width: 1180px) {
+      .summary-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .toolbar {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 820px) {
+      .topbar {
+        padding: 13px 16px;
+      }
+
+      .topbar-meta {
+        display: none;
+      }
+
+      .layout {
+        display: block;
+      }
+
+      .sidebar {
+        display: flex;
+        gap: 6px;
+        overflow-x: auto;
+        padding: 10px 12px;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .nav-label {
+        display: none;
+      }
+
+      .nav-button {
+        width: auto;
+        min-width: max-content;
+        margin: 0;
+      }
+
+      .main {
+        padding: 18px 14px;
+      }
+
+      .page-head {
+        display: block;
+      }
+
+      .toolbar,
+      .summary-grid,
+      .two-columns,
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .form-grid .wide {
+        grid-column: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">SE</div>
+        <div>
+          <p class="brand-title">Pendataan Lapangan</p>
+          <p class="brand-subtitle">Sensus Ekonomi 2026 · Dashboard Pengawasan</p>
+        </div>
+      </div>
+      <div class="topbar-meta">
+        <span><span class="status-dot"></span>Apps Script aktif</span>
+        <span id="last-updated">Belum dimuat</span>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="nav-label">Menu utama</div>
+        <button class="nav-button active" data-tab="overview">◈ <span>Monitoring</span></button>
+        <button class="nav-button" data-tab="reports">▣ <span>Laporan PDF</span></button>
+        <button class="nav-button" data-tab="petugas">♙ <span>Petugas</span></button>
+        <button class="nav-button" data-tab="master">⌘ <span>Master Wilayah</span></button>
+      </aside>
+
+      <main class="main">
+        <div class="page-head">
+          <div>
+            <p class="eyebrow">PCAAI · Controlling &amp; Analysis</p>
+            <h1 id="page-title">Monitoring Progress</h1>
+            <p class="page-description" id="page-description">
+              Pantau cakupan pendataan yang sudah tersinkron dari aplikasi mobile
+              menurut kabupaten, kecamatan, SLS, dan petugas.
+            </p>
+          </div>
+          <div class="loading" id="global-loading">
+            <span class="spinner"></span>
+            <span>Memuat data…</span>
+          </div>
+        </div>
+
+        <section class="panel active" id="panel-overview">
+          <div class="toolbar">
+            <div class="field">
+              <label for="filter-kab">Kabupaten</label>
+              <select id="filter-kab">
+                <option value="">Semua kabupaten</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="filter-kec">Kecamatan</label>
+              <select id="filter-kec">
+                <option value="">Semua kecamatan</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="filter-petugas">Petugas</label>
+              <select id="filter-petugas">
+                <option value="">Semua petugas</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="filter-date-from">Tanggal mulai</label>
+              <input id="filter-date-from" type="date">
+            </div>
+            <div class="field">
+              <label for="filter-date-to">Tanggal akhir</label>
+              <input id="filter-date-to" type="date">
+            </div>
+            <button class="button" id="refresh-dashboard" type="button">Refresh</button>
+          </div>
+
+          <div class="summary-grid" id="summary-grid"></div>
+
+          <div class="two-columns">
+            <article class="table-card">
+              <div class="table-head">
+                <div>
+                  <h2>Progress Kabupaten</h2>
+                  <p>Akumulasi target dan data tersinkron.</p>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Kabupaten</th>
+                      <th>Progress</th>
+                      <th>Target</th>
+                      <th>Terdata</th>
+                    </tr>
+                  </thead>
+                  <tbody id="table-kabupaten"></tbody>
+                </table>
+              </div>
+            </article>
+
+            <article class="table-card">
+              <div class="table-head">
+                <div>
+                  <h2>Progress Kecamatan</h2>
+                  <p>Gunakan filter kabupaten untuk mempersempit.</p>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Kecamatan</th>
+                      <th>Progress</th>
+                      <th>Target</th>
+                      <th>Terdata</th>
+                    </tr>
+                  </thead>
+                  <tbody id="table-kecamatan"></tbody>
+                </table>
+              </div>
+            </article>
+          </div>
+
+          <article class="table-card">
+            <div class="table-head">
+              <div>
+                <h2>Progress Berdasarkan Petugas</h2>
+                <p>Target petugas mengikuti wilayah penugasan pada sheet petugas/penugasan.</p>
+              </div>
+              <span class="stat-note">Data offline muncul setelah sinkronisasi</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Petugas</th>
+                    <th>Progress</th>
+                    <th>Target</th>
+                    <th>Terdata</th>
+                    <th>Lengkap</th>
+                    <th>Audit</th>
+                  </tr>
+                </thead>
+                <tbody id="table-petugas"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="table-card" style="margin-top:18px">
+            <div class="table-head">
+              <div>
+                <h2>Data Terbaru</h2>
+                <p>Maksimal 100 record terbaru sesuai filter.</p>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Waktu</th>
+                    <th>Petugas</th>
+                    <th>Wilayah</th>
+                    <th>Objek</th>
+                    <th>Status</th>
+                    <th>Audit</th>
+                  </tr>
+                </thead>
+                <tbody id="table-latest"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <div class="legend" style="margin-top:14px">
+            <span class="legend-item"><i class="legend-dot dot-red"></i>0–&lt;20%</span>
+            <span class="legend-item"><i class="legend-dot dot-orange"></i>20–&lt;40%</span>
+            <span class="legend-item"><i class="legend-dot dot-yellow"></i>40–&lt;60%</span>
+            <span class="legend-item"><i class="legend-dot dot-green"></i>60–&lt;80%</span>
+            <span class="legend-item"><i class="legend-dot dot-green-dark"></i>≥80%</span>
+          </div>
+        </section>
+
+        <section class="panel" id="panel-reports">
+          <article class="report-card">
+            <div class="form-head">
+              <div>
+                <h2>Unduh Laporan PDF per Petugas</h2>
+                <p>Laporan dibuat dari data yang telah berhasil masuk ke Spreadsheet.</p>
+              </div>
+            </div>
+            <div class="form-grid">
+              <div class="field">
+                <label for="report-petugas">Petugas *</label>
+                <select id="report-petugas">
+                  <option value="">Pilih petugas</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="report-kab">Filter kabupaten</label>
+                <select id="report-kab">
+                  <option value="">Semua kabupaten</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="report-kec">Filter kecamatan</label>
+                <select id="report-kec">
+                  <option value="">Semua kecamatan</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="report-date-from">Tanggal mulai</label>
+                <input id="report-date-from" type="date">
+              </div>
+              <div class="field">
+                <label for="report-date-to">Tanggal akhir</label>
+                <input id="report-date-to" type="date">
+              </div>
+              <label class="checkbox-field">
+                <input id="report-include-photos" type="checkbox" checked>
+                Sertakan foto watermark dalam lampiran PDF
+              </label>
+            </div>
+            <div class="form-actions">
+              <button class="button teal" id="generate-report" type="button">Buat &amp; Download PDF</button>
+            </div>
+            <p class="help" style="padding:0 18px">
+              Untuk laporan dengan banyak foto, batasi periode/wilayah agar proses tetap cepat.
+              Foto diambil dari Google Drive berdasarkan URL/file ID hasil sinkronisasi.
+            </p>
+            <div class="report-result" id="report-result"></div>
+          </article>
+        </section>
+
+        <section class="panel" id="panel-petugas">
+          <article class="form-card">
+            <div class="form-head">
+              <div>
+                <h2>Input / Perbarui Petugas</h2>
+                <p>Gunakan kode yang sama untuk memperbarui petugas tanpa menghapus riwayat data.</p>
+              </div>
+            </div>
+            <form id="petugas-form">
+              <div class="form-grid">
+                <div class="field">
+                  <label for="petugas-id">Kode petugas *</label>
+                  <input id="petugas-id" required maxlength="50" placeholder="Contoh: P001">
+                </div>
+                <div class="field">
+                  <label for="petugas-nama">Nama petugas *</label>
+                  <input id="petugas-nama" required maxlength="150" placeholder="Nama lengkap">
+                </div>
+                <div class="field">
+                  <label for="petugas-pin">PIN</label>
+                  <input id="petugas-pin" type="password" maxlength="100" placeholder="Wajib untuk petugas baru">
+                </div>
+                <div class="field">
+                  <label for="petugas-wilayah">Wilayah penugasan</label>
+                  <input id="petugas-wilayah" maxlength="2000" placeholder="Kode SLS/kecamatan, pisahkan dengan koma">
+                </div>
+                <label class="checkbox-field">
+                  <input id="petugas-aktif" type="checkbox" checked>
+                  Petugas aktif dan dapat login
+                </label>
+              </div>
+              <div class="form-actions">
+                <button class="button teal" type="submit">Simpan Petugas</button>
+                <button class="button secondary" id="reset-petugas" type="button">Kosongkan Form</button>
+              </div>
+            </form>
+          </article>
+
+          <article class="table-card">
+            <div class="table-head">
+              <div>
+                <h2>Daftar Petugas</h2>
+                <p>PIN tidak pernah ditampilkan; yang disimpan server adalah hash SHA-256.</p>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Kode</th>
+                    <th>Nama</th>
+                    <th>Penugasan</th>
+                    <th>Status</th>
+                    <th>Aksi</th>
+                  </tr>
+                </thead>
+                <tbody id="table-workers"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section class="panel" id="panel-master">
+          <article class="form-card">
+            <div class="form-head">
+              <div>
+                <h2>Import Master Wilayah</h2>
+                <p>Mode upsert berdasarkan <code>kode_sls</code>; baris yang tidak ada pada file tidak dihapus.</p>
+              </div>
+              <span class="pill ok" id="master-info">Belum dimuat</span>
+            </div>
+            <div class="field" style="padding:0 18px">
+              <label for="master-csv">CSV/TSV dengan header berikut</label>
+              <textarea id="master-csv" spellcheck="false">kode_kab,kabupaten,kode_kec,nama_kec,kode_desa,nama_desa,kode_sls,nama_sls,target_responden,lat_centroid,lon_centroid,versi_master</textarea>
+            </div>
+            <p class="help" style="padding:0 18px">
+              Wajib mempertahankan kode wilayah sebagai teks agar angka nol di depan tidak hilang.
+              Sistem menaikkan <code>versi_master</code> secara otomatis setelah import.
+            </p>
+            <div class="form-actions">
+              <button class="button amber" id="import-master" type="button">Validasi &amp; Import Master</button>
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    var INITIAL_TOKEN = <?!= dashboardTokenJson ?>;
+    var state = {
+      token: INITIAL_TOKEN || '',
+      bootstrap: null,
+      data: null
+    };
+
+    function byId(id) {
+      return document.getElementById(id);
+    }
+
+    function escapeHtml(value) {
+      return String(value === undefined || value === null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function callServer(functionName, payload) {
+      return new Promise(function(resolve, reject) {
+        var runner = google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler(function(error) {
+            reject(new Error(
+              error && error.message
+                ? error.message
+                : String(error || 'Permintaan gagal.')
+            ));
+          });
+        runner[functionName](payload || {});
+      });
+    }
+
+    function setLoading(visible) {
+      byId('global-loading').classList.toggle('visible', visible);
+    }
+
+    function showToast(message, isError) {
+      var toast = byId('toast');
+      toast.textContent = message;
+      toast.classList.toggle('error', Boolean(isError));
+      toast.classList.add('visible');
+      window.clearTimeout(showToast.timer);
+      showToast.timer = window.setTimeout(function() {
+        toast.classList.remove('visible');
+      }, 5000);
+    }
+
+    function setOptions(selectId, items, valueKey, labelBuilder, includeAll) {
+      var select = byId(selectId);
+      var current = select.value;
+      var prefix = includeAll
+        ? '<option value="">Semua pilihan</option>'
+        : '<option value="">Pilih petugas</option>';
+      var html = prefix;
+
+      (items || []).forEach(function(item) {
+        var value = item[valueKey] || '';
+        html += '<option value="' + escapeHtml(value) + '">' +
+          escapeHtml(labelBuilder(item)) + '</option>';
+      });
+      select.innerHTML = html;
+
+      if (current && Array.prototype.some.call(
+        select.options,
+        function(option) { return option.value === current; }
+      )) {
+        select.value = current;
+      }
+    }
+
+    function populateFilterOptions() {
+      var bootstrap = state.bootstrap || {};
+      var kabupaten = bootstrap.kabupaten || [];
+      var kecamatan = bootstrap.kecamatan || [];
+      setOptions(
+        'filter-kab',
+        kabupaten,
+        'kode_kab',
+        function(item) {
+          return (item.kode_kab ? item.kode_kab + ' · ' : '') +
+            (item.kabupaten || '-');
+        },
+        true
+      );
+      setOptions(
+        'report-kab',
+        kabupaten,
+        'kode_kab',
+        function(item) {
+          return (item.kode_kab ? item.kode_kab + ' · ' : '') +
+            (item.kabupaten || '-');
+        },
+        true
+      );
+      populateKecamatanOptions('filter-kec', kecamatan, '');
+      populateKecamatanOptions('report-kec', kecamatan, '');
+      setOptions(
+        'filter-petugas',
+        bootstrap.petugas || [],
+        'id_petugas',
+        function(item) {
+          return item.id_petugas + ' · ' + (item.nama || '-');
+        },
+        true
+      );
+      setOptions(
+        'report-petugas',
+        bootstrap.petugas || [],
+        'id_petugas',
+        function(item) {
+          return item.id_petugas + ' · ' + (item.nama || '-');
+        },
+        false
+      );
+    }
+
+    function populateKecamatanOptions(selectId, items, selectedKab) {
+      var filtered = (items || []).filter(function(item) {
+        return !selectedKab || item.kode_kab === selectedKab;
+      });
+      setOptions(
+        selectId,
+        filtered,
+        'kode_kec',
+        function(item) {
+          return (item.kode_kec ? item.kode_kec + ' · ' : '') +
+            (item.nama_kec || '-');
+        },
+        true
+      );
+    }
+
+    function collectDashboardFilters() {
+      return {
+        kode_kab: byId('filter-kab').value,
+        kode_kec: byId('filter-kec').value,
+        id_petugas: byId('filter-petugas').value,
+        date_from: byId('filter-date-from').value,
+        date_to: byId('filter-date-to').value
+      };
+    }
+
+    function progressClass(percent) {
+      var value = Number(percent) || 0;
+      if (value >= 80) return 'coverage-green-dark';
+      if (value >= 60) return 'coverage-green';
+      if (value >= 40) return 'coverage-yellow';
+      if (value >= 20) return 'coverage-orange';
+      return 'coverage-red-dark';
+    }
+
+    function progressHtml(percent) {
+      var value = Number(percent) || 0;
+      var width = Math.max(0, Math.min(value, 100));
+      return '<div class="progress-row ' + progressClass(value) + '">' +
+        '<div class="progress"><span style="width:' + width + '%"></span></div>' +
+        '<span class="progress-label">' + value.toFixed(2).replace('.', ',') + '%</span>' +
+        '</div>';
+    }
+
+    function number(value) {
+      return new Intl.NumberFormat('id-ID').format(Number(value) || 0);
+    }
+
+    function renderSummary(summary) {
+      summary = summary || {};
+      var cards = [
+        ['Target responden', number(summary.target), 'Master wilayah terpilih'],
+        ['Sudah terdata', number(summary.terdata), 'Record tersinkron'],
+        ['Cakupan', (Number(summary.persen_cakupan) || 0).toFixed(2).replace('.', ',') + '%', 'Rumus terdata ÷ target'],
+        ['Data lengkap', number(summary.lengkap), 'Status pendataan'],
+        ['Peringatan audit', number((summary.mock || 0) + (summary.flag_waktu || 0)), 'Mock GPS + flag waktu']
+      ];
+      byId('summary-grid').innerHTML = cards.map(function(card) {
+        return '<div class="summary-card">' +
+          '<div class="summary-label">' + escapeHtml(card[0]) + '</div>' +
+          '<div class="summary-value">' + escapeHtml(card[1]) + '</div>' +
+          '<div class="summary-hint">' + escapeHtml(card[2]) + '</div>' +
+          '</div>';
+      }).join('');
+    }
+
+    function emptyRow(colspan, message) {
+      return '<tr><td class="empty" colspan="' + colspan + '">' +
+        escapeHtml(message || 'Belum ada data.') + '</td></tr>';
+    }
+
+    function renderKabupaten(rows) {
+      byId('table-kabupaten').innerHTML = rows && rows.length
+        ? rows.map(function(row) {
+          return '<tr>' +
+            '<td><strong>' + escapeHtml(row.kabupaten || row.kode_kab || '-') + '</strong><br><span class="muted">' +
+            escapeHtml(row.kode_kab || '') + '</span></td>' +
+            '<td class="progress-cell">' + progressHtml(row.persen_cakupan) + '</td>' +
+            '<td>' + number(row.target) + '</td>' +
+            '<td>' + number(row.terdata) + '</td>' +
+            '</tr>';
+        }).join('')
+        : emptyRow(4, 'Belum ada data kabupaten untuk filter ini.');
+    }
+
+    function renderKecamatan(rows) {
+      byId('table-kecamatan').innerHTML = rows && rows.length
+        ? rows.map(function(row) {
+          return '<tr>' +
+            '<td><strong>' + escapeHtml(row.nama_kec || row.kode_kec || '-') + '</strong><br><span class="muted">' +
+            escapeHtml(row.kabupaten || row.kode_kab || '') + '</span></td>' +
+            '<td class="progress-cell">' + progressHtml(row.persen_cakupan) + '</td>' +
+            '<td>' + number(row.target) + '</td>' +
+            '<td>' + number(row.terdata) + '</td>' +
+            '</tr>';
+        }).join('')
+        : emptyRow(4, 'Belum ada data kecamatan untuk filter ini.');
+    }
+
+    function renderPetugas(rows) {
+      byId('table-petugas').innerHTML = rows && rows.length
+        ? rows.map(function(row) {
+          var audit = Number(row.mock || 0) + Number(row.flag_waktu || 0);
+          return '<tr>' +
+            '<td><strong>' + escapeHtml(row.nama || row.id_petugas || '-') + '</strong><br><span class="muted">' +
+            escapeHtml(row.id_petugas || '') + '</span></td>' +
+            '<td class="progress-cell">' + progressHtml(row.persen_cakupan) + '</td>' +
+            '<td>' + number(row.target) + '</td>' +
+            '<td>' + number(row.terdata) + '</td>' +
+            '<td>' + number(row.lengkap) + '</td>' +
+            '<td>' + (audit
+              ? '<span class="pill audit">' + number(audit) + ' audit</span>'
+              : '<span class="pill ok">OK</span>') + '</td>' +
+            '</tr>';
+        }).join('')
+        : emptyRow(6, 'Belum ada data petugas untuk filter ini.');
+    }
+
+    function renderLatest(rows) {
+      byId('table-latest').innerHTML = rows && rows.length
+        ? rows.map(function(row) {
+          var audit = [];
+          if (row.is_mock) audit.push('MOCK GPS');
+          if (row.flag_waktu) audit.push('WAKTU');
+          return '<tr>' +
+            '<td>' + escapeHtml(formatDate(row.waktu_pendataan)) + '</td>' +
+            '<td>' + escapeHtml(row.id_petugas || '-') + '</td>' +
+            '<td><strong>' + escapeHtml(row.nama_sls || row.kode_sls || '-') + '</strong><br><span class="muted">' +
+            escapeHtml(row.nama_kec || row.kode_kec || '-') + '</span></td>' +
+            '<td>' + escapeHtml((row.jenis_objek || '-') + ' · ' + (row.nama_objek || '-')) + '</td>' +
+            '<td>' + (row.status_pendataan === 'LENGKAP'
+              ? '<span class="pill ok">Lengkap</span>'
+              : '<span class="pill warning">Tidak lengkap</span>') + '</td>' +
+            '<td>' + (audit.length
+              ? '<span class="pill audit">' + escapeHtml(audit.join(', ')) + '</span>'
+              : '<span class="pill ok">OK</span>') + '</td>' +
+            '</tr>';
+        }).join('')
+        : emptyRow(6, 'Belum ada record tersinkron.');
+    }
+
+    function formatDate(value) {
+      if (!value) return '-';
+      var date = new Date(value);
+      if (isNaN(date.getTime())) return String(value);
+      return date.toLocaleString('id-ID', {
+        dateStyle: 'medium',
+        timeStyle: 'short'
+      });
+    }
+
+    function renderDashboard(data) {
+      state.data = data;
+      renderSummary(data.summary);
+      renderKabupaten(data.by_kabupaten || []);
+      renderKecamatan(data.by_kecamatan || []);
+      renderPetugas(data.by_petugas || []);
+      renderLatest(data.latest || []);
+      byId('last-updated').textContent = 'Diperbarui ' + formatDate(data.generated_at);
+    }
+
+    async function refreshDashboard() {
+      setLoading(true);
+      try {
+        var response = await callServer('getDashboardData', {
+          dashboard_token: state.token,
+          filters: collectDashboardFilters()
+        });
+        renderDashboard(response);
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    function renderWorkers() {
+      var workers = state.bootstrap && state.bootstrap.petugas
+        ? state.bootstrap.petugas
+        : [];
+      byId('table-workers').innerHTML = workers.length
+        ? workers.map(function(worker) {
+          return '<tr>' +
+            '<td><strong>' + escapeHtml(worker.id_petugas) + '</strong></td>' +
+            '<td>' + escapeHtml(worker.nama || '-') + '</td>' +
+            '<td class="muted">' + escapeHtml(worker.wilayah_penugasan || 'Semua wilayah') + '</td>' +
+            '<td>' + (worker.aktif
+              ? '<span class="pill active">Aktif</span>'
+              : '<span class="pill inactive">Nonaktif</span>') + '</td>' +
+            '<td><button class="button secondary small" type="button" onclick="editPetugas(\'' +
+            escapeHtml(worker.id_petugas) + '\')">Edit</button></td>' +
+            '</tr>';
+        }).join('')
+        : emptyRow(5, 'Belum ada petugas.');
+    }
+
+    function editPetugas(id) {
+      var workers = state.bootstrap && state.bootstrap.petugas
+        ? state.bootstrap.petugas
+        : [];
+      var worker = workers.find(function(item) {
+        return item.id_petugas === id;
+      });
+      if (!worker) return;
+      byId('petugas-id').value = worker.id_petugas;
+      byId('petugas-nama').value = worker.nama || '';
+      byId('petugas-pin').value = '';
+      byId('petugas-wilayah').value = worker.wilayah_penugasan || '';
+      byId('petugas-aktif').checked = Boolean(worker.aktif);
+      activateTab('petugas');
+      byId('petugas-nama').focus();
+      showToast('Form petugas dimuat. Kosongkan PIN jika tidak ingin menggantinya.');
+    }
+
+    function clearPetugasForm() {
+      byId('petugas-form').reset();
+      byId('petugas-aktif').checked = true;
+    }
+
+    function parseDelimited(text) {
+      var firstLine = String(text || '').split(/\r?\n/)[0] || '';
+      var delimiter = firstLine.indexOf('\t') >= 0
+        ? '\t'
+        : firstLine.indexOf(';') >= 0 && firstLine.indexOf(',') < 0
+          ? ';'
+          : ',';
+      var rows = [];
+      var row = [];
+      var cell = '';
+      var quoted = false;
+
+      for (var index = 0; index < text.length; index++) {
+        var character = text[index];
+        var next = text[index + 1];
+        if (character === '"' && quoted && next === '"') {
+          cell += '"';
+          index++;
+        } else if (character === '"') {
+          quoted = !quoted;
+        } else if (character === delimiter && !quoted) {
+          row.push(cell.trim());
+          cell = '';
+        } else if ((character === '\n' || character === '\r') && !quoted) {
+          if (character === '\r' && next === '\n') index++;
+          row.push(cell.trim());
+          if (row.some(function(value) { return value !== ''; })) rows.push(row);
+          row = [];
+          cell = '';
+        } else {
+          cell += character;
+        }
+      }
+      row.push(cell.trim());
+      if (row.some(function(value) { return value !== ''; })) rows.push(row);
+      if (rows.length < 2) throw new Error('CSV harus memiliki header dan minimal satu baris data.');
+
+      var headers = rows[0].map(function(header) {
+        return String(header || '')
+          .replace(/^\uFEFF/, '')
+          .trim()
+          .toLowerCase()
+          .replace(/[\s-]+/g, '_');
+      });
+      var required = [
+        'kode_kab', 'kabupaten', 'kode_kec', 'nama_kec',
+        'kode_desa', 'nama_desa', 'kode_sls', 'nama_sls',
+        'target_responden'
+      ];
+      var missing = required.filter(function(header) {
+        return headers.indexOf(header) < 0;
+      });
+      if (missing.length) {
+        throw new Error('Header CSV kurang: ' + missing.join(', '));
+      }
+
+      return rows.slice(1).map(function(values) {
+        var object = {};
+        headers.forEach(function(header, headerIndex) {
+          object[header] = values[headerIndex] || '';
+        });
+        return object;
+      });
+    }
+
+    async function importMaster() {
+      var button = byId('import-master');
+      button.disabled = true;
+      try {
+        var records = parseDelimited(byId('master-csv').value);
+        var response = await callServer('importDashboardMaster', {
+          dashboard_token: state.token,
+          records: records
+        });
+        showToast(
+          'Master berhasil diimport. Diperbarui: ' + response.updated +
+          ', ditambahkan: ' + response.inserted +
+          ', versi: ' + response.versi_master
+        );
+        await loadBootstrap();
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function savePetugas(event) {
+      event.preventDefault();
+      var button = event.submitter;
+      if (button) button.disabled = true;
+      try {
+        var response = await callServer('saveDashboardPetugas', {
+          dashboard_token: state.token,
+          id_petugas: byId('petugas-id').value,
+          nama: byId('petugas-nama').value,
+          pin: byId('petugas-pin').value,
+          wilayah_penugasan: byId('petugas-wilayah').value,
+          aktif: byId('petugas-aktif').checked
+        });
+        showToast(
+          response.mode === 'created'
+            ? 'Petugas berhasil ditambahkan.'
+            : 'Petugas berhasil diperbarui.'
+        );
+        clearPetugasForm();
+        await loadBootstrap();
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        if (button) button.disabled = false;
+      }
+    }
+
+    async function generateReport() {
+      var idPetugas = byId('report-petugas').value;
+      if (!idPetugas) {
+        showToast('Pilih petugas terlebih dahulu.', true);
+        return;
+      }
+
+      var button = byId('generate-report');
+      var resultBox = byId('report-result');
+      button.disabled = true;
+      resultBox.classList.remove('visible');
+      try {
+        var response = await callServer('generatePetugasReport', {
+          dashboard_token: state.token,
+          id_petugas: idPetugas,
+          kode_kab: byId('report-kab').value,
+          kode_kec: byId('report-kec').value,
+          date_from: byId('report-date-from').value,
+          date_to: byId('report-date-to').value,
+          include_photos: byId('report-include-photos').checked
+        });
+        resultBox.innerHTML =
+          '<strong>PDF berhasil dibuat:</strong> ' +
+          escapeHtml(response.nama_file) +
+          '<br>Record: ' + number(response.jumlah_record) +
+          ' · Foto: ' + number(response.jumlah_foto) +
+          '<br><a href="' + escapeHtml(response.download_url || response.url) +
+          '" target="_blank" rel="noopener">Buka / Download laporan PDF</a>';
+        resultBox.classList.add('visible');
+        showToast('Laporan PDF berhasil dibuat.');
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function loadBootstrap() {
+      setLoading(true);
+      try {
+        state.bootstrap = await callServer('getDashboardBootstrap', {
+          dashboard_token: state.token
+        });
+        populateFilterOptions();
+        renderWorkers();
+        byId('master-info').textContent =
+          number(state.bootstrap.jumlah_sls) + ' SLS · versi ' +
+          number(state.bootstrap.versi_master);
+        await refreshDashboard();
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    function activateTab(tabName) {
+      document.querySelectorAll('.nav-button').forEach(function(button) {
+        button.classList.toggle('active', button.getAttribute('data-tab') === tabName);
+      });
+      document.querySelectorAll('.panel').forEach(function(panel) {
+        panel.classList.toggle('active', panel.id === 'panel-' + tabName);
+      });
+      var titles = {
+        overview: ['Monitoring Progress', 'Pantau cakupan pendataan yang sudah tersinkron dari aplikasi mobile menurut kabupaten, kecamatan, SLS, dan petugas.'],
+        reports: ['Laporan PDF per Petugas', 'Buat laporan rapi berdasarkan petugas, wilayah, periode, serta foto watermark dari Google Drive.'],
+        petugas: ['Manajemen Petugas', 'Tambah, perbarui, atau nonaktifkan akun petugas tanpa menghapus riwayat pendataan.'],
+        master: ['Manajemen Master Wilayah', 'Import master Kabupaten–Kecamatan–Desa–SLS dengan validasi dan kenaikan versi otomatis.']
+      };
+      byId('page-title').textContent = titles[tabName][0];
+      byId('page-description').textContent = titles[tabName][1];
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+      document.querySelectorAll('.nav-button').forEach(function(button) {
+        button.addEventListener('click', function() {
+          activateTab(button.getAttribute('data-tab'));
+        });
+      });
+      byId('filter-kab').addEventListener('change', function() {
+        var kecamatan = state.bootstrap ? state.bootstrap.kecamatan : [];
+        populateKecamatanOptions('filter-kec', kecamatan, this.value);
+        refreshDashboard();
+      });
+      byId('report-kab').addEventListener('change', function() {
+        var kecamatan = state.bootstrap ? state.bootstrap.kecamatan : [];
+        populateKecamatanOptions('report-kec', kecamatan, this.value);
+      });
+      byId('filter-kec').addEventListener('change', refreshDashboard);
+      byId('filter-petugas').addEventListener('change', refreshDashboard);
+      byId('filter-date-from').addEventListener('change', refreshDashboard);
+      byId('filter-date-to').addEventListener('change', refreshDashboard);
+      byId('refresh-dashboard').addEventListener('click', refreshDashboard);
+      byId('petugas-form').addEventListener('submit', savePetugas);
+      byId('reset-petugas').addEventListener('click', clearPetugasForm);
+      byId('import-master').addEventListener('click', importMaster);
+      byId('generate-report').addEventListener('click', generateReport);
+      loadBootstrap();
+    });
+  </script>
+</body>
+</html>

@@ -50,10 +50,53 @@ hanya digest SHA-256 terenkripsi untuk validasi login offline.
 ## Menyiapkan Apps Script
 
 1. Buka `Code.gs` pada project Apps Script.
-2. Isi Script Properties: `SPREADSHEET_ID`, `DRIVE_FOLDER_ID`, dan `API_TOKEN`.
+2. Isi Script Properties:
+   `SPREADSHEET_ID`, `DRIVE_FOLDER_ID`, dan `API_TOKEN`.
 3. Jalankan `setupBackend()` satu kali.
 4. Isi sheet `petugas` dan `master_wilayah` sesuai header yang dibuat.
 5. Deploy sebagai Web App dengan akses sesuai kebutuhan operasional.
+
+## Dashboard web dan laporan PDF
+
+Dashboard web menggunakan Spreadsheet yang sama sebagai sumber data sehingga
+tidak membuat salinan data dan tidak mengubah kontrak API Android. File
+`Dashboard.html` disajikan melalui route baru:
+
+```text
+https://script.google.com/macros/s/DEPLOYMENT_ID/exec?page=dashboard&admin_token=DASHBOARD_TOKEN
+```
+
+Tambahkan Script Properties berikut:
+
+```text
+DASHBOARD_TOKEN  = token khusus dashboard, berbeda dari API_TOKEN
+ADMIN_EMAILS     = email admin yang boleh mengakses, pisahkan dengan koma
+REPORT_FOLDER_ID = ID folder Drive khusus PDF (opsional; jika kosong,
+                   laporan memakai DRIVE_FOLDER_ID)
+```
+
+Setelah menambahkan `Dashboard.html` dan `Code.gs` ke Apps Script, deploy
+versi baru Web App. Menu dashboard menyediakan:
+
+- monitoring progress per kabupaten, kecamatan, SLS, dan petugas;
+- input/perbarui petugas tanpa menyimpan PIN mentah;
+- import master wilayah dengan mode upsert berdasarkan `kode_sls`;
+- pembuatan PDF rapi per petugas berdasarkan periode dan wilayah;
+- lampiran foto watermark dari Google Drive secara opsional.
+
+Jalankan `setupBackend()` kembali setelah pembaruan kode. Fungsi ini hanya
+membuat sheet yang belum ada dan memeriksa header wajib. Sheet tambahan
+`penugasan` dapat digunakan untuk menyimpan:
+
+```text
+id_penugasan, id_petugas, kode_kab, kode_kec, kode_desa, kode_sls,
+aktif, keterangan, created_at, updated_at
+```
+
+Baris master lama tidak dihapus ketika import dari dashboard. Versi master
+akan dinaikkan otomatis agar perangkat Android mengetahui bahwa cache perlu
+diperbarui. PDF hanya memuat record yang sudah berhasil masuk ke sheet
+`pendataan`; data yang masih offline di perangkat belum dapat dilaporkan.
 
 Header `master_wilayah` wajib memuat hierarki berikut:
 
