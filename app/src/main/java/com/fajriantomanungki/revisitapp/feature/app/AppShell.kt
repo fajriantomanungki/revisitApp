@@ -7,14 +7,22 @@ import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -22,10 +30,12 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -37,7 +47,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -200,13 +213,32 @@ fun RevisitAppShell(
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         bottomBar = {
-            NavigationBar {
-                listOf("Pendataan", "Wilayah", "Dashboard").forEachIndexed { index, label ->
+            NavigationBar(
+                containerColor = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp
+            ) {
+                listOf(
+                    "Pendataan" to "P",
+                    "Wilayah" to "W",
+                    "Dashboard" to "D"
+                ).forEachIndexed { index, (label, glyph) ->
                     NavigationBarItem(
                         selected = selectedTab == index,
                         onClick = { selectedTab = index },
-                        icon = { Text(label.first().toString()) },
-                        label = { Text(label) }
+                        icon = {
+                            NavigationGlyph(
+                                glyph = glyph,
+                                selected = selectedTab == index
+                            )
+                        },
+                        label = { Text(label) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            selectedTextColor = MaterialTheme.colorScheme.primary,
+                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     )
                 }
             }
@@ -334,86 +366,208 @@ private fun PendataanListScreen(
             it.waktuDibuat <= staleThreshold
     }
 
-    Column(
-        modifier = modifier.fillMaxSize().padding(16.dp),
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text(
-            text = "Daftar Pendataan",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold
-        )
-        Text(
-            text = if (idPetugas.isBlank()) {
-                "Sesi petugas belum dikonfigurasi"
-            } else {
-                "Petugas: $idPetugas"
-            }
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
-        ) {
-            OutlinedButton(
-                onClick = onLogout,
-                enabled = !isLoggingOut
-            ) {
-                Text(if (isLoggingOut) "Memeriksa..." else "Logout")
-            }
-        }
-        OutlinedActionButton(
-            text = "+ Tambah Pendataan",
-            onClick = onAdd,
-            enabled = canAdd,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            SummaryCard("Terkirim", sent, Color(0xFF1B5E20), Modifier.weight(1f))
-            SummaryCard("Menunggu", waiting, Color(0xFF1565C0), Modifier.weight(1f))
-            SummaryCard("Gagal", failed, MaterialTheme.colorScheme.error, Modifier.weight(1f))
-        }
-        Button(
-            onClick = onSend,
-            enabled = waiting > 0,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Kirim ($waiting)")
-        }
-
-        if (staleRows > 0) {
-            Card(
+        item {
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.errorContainer
-                )
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text(
-                    text = "Peringatan: $staleRows entri belum terkirim " +
-                        "lebih dari 24 jam.",
-                    modifier = Modifier.padding(12.dp),
-                    color = MaterialTheme.colorScheme.onErrorContainer
-                )
-            }
-        }
-
-        if (rows.isEmpty()) {
-            Text(
-                text = "Belum ada entri. Form pendataan akan menggunakan sumber data Room ini.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(rows, key = { it.idRecord }) { row ->
-                    PendataanRow(row, onDelete = { onDelete(row) })
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Daftar Pendataan",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = if (idPetugas.isBlank()) {
+                            "Sesi petugas belum dikonfigurasi"
+                        } else {
+                            "Petugas: $idPetugas"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                OutlinedButton(
+                    onClick = onLogout,
+                    enabled = !isLoggingOut,
+                    shape = MaterialTheme.shapes.medium,
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    Text(if (isLoggingOut) "Memeriksa..." else "Logout")
                 }
             }
         }
+        item {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(MaterialTheme.shapes.large)
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(
+                                MaterialTheme.colorScheme.primary,
+                                MaterialTheme.colorScheme.secondary
+                            )
+                        )
+                    )
+                    .padding(18.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Pendataan lapangan",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Simpan dulu di perangkat. Kirim batch saat jaringan tersedia.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.86f)
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = Color.White.copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            text = "OFFLINE-FIRST  •  ROOM AKTIF",
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+        item {
+            OutlinedActionButton(
+                text = "+  Tambah Pendataan",
+                onClick = onAdd,
+                enabled = canAdd,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SummaryCard(
+                    label = "Terkirim",
+                    count = sent,
+                    color = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.weight(1f)
+                )
+                SummaryCard(
+                    label = "Menunggu",
+                    count = waiting,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f)
+                )
+                SummaryCard(
+                    label = "Gagal",
+                    count = failed,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+        item {
+            Button(
+                onClick = onSend,
+                enabled = waiting > 0,
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (waiting > 0) "Kirim $waiting entri" else "Tidak ada antrean")
+            }
+        }
+        if (staleRows > 0) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.medium,
+                    border = BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.error.copy(alpha = 0.25f)
+                    ),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer
+                    )
+                ) {
+                    Text(
+                        text = "Peringatan: $staleRows entri belum terkirim lebih dari 24 jam.",
+                        modifier = Modifier.padding(14.dp),
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+        }
+        if (rows.isEmpty()) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.large,
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "Belum ada pendataan",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Tekan tombol tambah untuk memulai pendataan pertama Anda.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        } else {
+            items(rows, key = { it.idRecord }) { row ->
+                PendataanRow(row, onDelete = { onDelete(row) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun NavigationGlyph(
+    glyph: String,
+    selected: Boolean
+) {
+    Box(
+        modifier = Modifier
+            .size(30.dp)
+            .clip(CircleShape)
+            .background(
+                if (selected) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                }
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = glyph,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 
@@ -427,7 +581,9 @@ private fun OutlinedActionButton(
     androidx.compose.material3.OutlinedButton(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier
+        modifier = modifier,
+        shape = MaterialTheme.shapes.medium,
+        contentPadding = PaddingValues(vertical = 14.dp)
     ) {
         Text(text)
     }
@@ -442,13 +598,29 @@ private fun SummaryCard(
 ) {
     Card(
         modifier = modifier,
+        shape = MaterialTheme.shapes.medium,
+        border = BorderStroke(1.dp, color.copy(alpha = 0.22f)),
         colors = CardDefaults.cardColors(
             containerColor = color.copy(alpha = 0.14f)
         )
     ) {
-        Column(modifier = Modifier.padding(10.dp)) {
-            Text(label, style = MaterialTheme.typography.labelMedium)
-            Text(count.toString(), fontWeight = FontWeight.Bold)
+        Column(
+            modifier = Modifier
+                .heightIn(min = 88.dp)
+                .padding(12.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                count.toString(),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = color
+            )
         }
     }
 }
@@ -467,24 +639,56 @@ private fun PendataanRow(
         else -> Triple(row.statusKirim, Color.Gray, "?")
     }
 
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(
-                text = row.namaObjek.ifBlank { "Tanpa nama objek" },
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = listOf(row.namaSls, row.jenisObjek)
-                    .filter { it.isNotBlank() }
-                    .joinToString(" • ")
-            )
-            Text(
-                text = "$symbol $label",
-                color = color,
-                fontWeight = FontWeight.Medium
-            )
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        border = BorderStroke(1.dp, color.copy(alpha = 0.18f)),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = row.namaObjek.ifBlank { "Tanpa nama objek" },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = listOf(row.namaSls, row.jenisObjek)
+                            .filter { it.isNotBlank() }
+                            .joinToString(" • "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = color.copy(alpha = 0.13f)
+                ) {
+                    Text(
+                        text = "$symbol  $label",
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+                        color = color,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
             row.pesanError?.takeIf { it.isNotBlank() }?.let {
-                Text(it, color = MaterialTheme.colorScheme.error)
+                Text(
+                    it,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
             if (row.statusKirim == SyncStatus.TERKIRIM) {
                 Text(
@@ -493,7 +697,10 @@ private fun PendataanRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             } else {
-                TextButton(onClick = onDelete) {
+                TextButton(
+                    onClick = onDelete,
+                    contentPadding = PaddingValues(horizontal = 0.dp)
+                ) {
                     Text("Hapus")
                 }
             }

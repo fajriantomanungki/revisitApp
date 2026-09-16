@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -33,9 +35,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
@@ -367,12 +372,24 @@ fun PendataanFormScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Tambah Pendataan") },
+                title = {
+                    Column {
+                        Text("Tambah Pendataan")
+                        Text(
+                            text = "Form lapangan SE2026",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
                 navigationIcon = {
                     TextButton(onClick = ::attemptBack, enabled = !isSaving) {
-                        Text("Kembali")
+                        Text("‹  Kembali")
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                )
             )
         }
     ) { paddingValues ->
@@ -384,11 +401,34 @@ fun PendataanFormScreen(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(
-                text = "Form Pendataan Responden",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(MaterialTheme.shapes.large)
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(
+                                MaterialTheme.colorScheme.primary,
+                                MaterialTheme.colorScheme.secondary
+                            )
+                        )
+                    )
+                    .padding(18.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Form Pendataan Responden",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Lengkapi wilayah, lokasi, identitas objek, dan bukti foto.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.86f)
+                    )
+                }
+            }
 
             FormWilayahSection(
                 wilayah = wilayah,
@@ -409,15 +449,15 @@ fun PendataanFormScreen(
                 }
             )
 
-            HorizontalDivider()
-            Text(
-                text = "Bagian Lokasi & Waktu",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
+            FormSectionHeader(
+                number = "02",
+                title = "Lokasi & waktu",
+                subtitle = "Ambil titik aktual sebelum memotret objek."
             )
             Button(
                 onClick = ::requestLocation,
                 enabled = !isSaving && !isProcessingPhoto,
+                shape = MaterialTheme.shapes.medium,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(if (capturedLocation == null) "Ambil Titik Lokasi" else "Ambil Ulang Lokasi")
@@ -436,17 +476,17 @@ fun PendataanFormScreen(
                             errorMessage = "Pengaturan lokasi tidak dapat dibuka."
                         }
                     },
+                    shape = MaterialTheme.shapes.medium,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("Buka Pengaturan Lokasi")
                 }
             }
 
-            HorizontalDivider()
-            Text(
-                text = "Bagian Identitas Objek",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
+            FormSectionHeader(
+                number = "03",
+                title = "Identitas objek",
+                subtitle = "Informasi dasar usaha atau keluarga yang didata."
             )
             FormChoiceDropdown(
                 label = "Jenis objek",
@@ -468,6 +508,7 @@ fun PendataanFormScreen(
                 },
                 supportingText = { Text("${namaObjek.length}/100") },
                 singleLine = true,
+                shape = MaterialTheme.shapes.medium,
                 modifier = Modifier.fillMaxWidth()
             )
             OutlinedTextField(
@@ -475,6 +516,8 @@ fun PendataanFormScreen(
                 onValueChange = { alamat = it.take(200) },
                 label = { Text("Alamat / catatan lokasi") },
                 supportingText = { Text("${alamat.length}/200") },
+                minLines = 2,
+                shape = MaterialTheme.shapes.medium,
                 modifier = Modifier.fillMaxWidth()
             )
             FormChoiceDropdown(
@@ -496,19 +539,26 @@ fun PendataanFormScreen(
                     onValueChange = { catatan = it.take(500) },
                     label = { Text("Catatan (wajib)") },
                     supportingText = { Text("${catatan.length}/500") },
+                    minLines = 3,
+                    shape = MaterialTheme.shapes.medium,
                     modifier = Modifier.fillMaxWidth()
                 )
             }
 
-            HorizontalDivider()
-            Text(
-                text = "Bagian Foto Bukti",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
+            FormSectionHeader(
+                number = "04",
+                title = "Foto bukti",
+                subtitle = "Setiap foto akan diberi watermark koordinat dan waktu."
             )
-            Text("${photos.size}/$MAX_PHOTOS foto watermark tersimpan di penyimpanan privat aplikasi.")
+            Text(
+                text = "${photos.size}/$MAX_PHOTOS foto watermark tersimpan di penyimpanan privat aplikasi.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 photos.forEachIndexed { index, file ->
@@ -530,6 +580,7 @@ fun PendataanFormScreen(
                     photos.size < MAX_PHOTOS &&
                     !isSaving &&
                     !isProcessingPhoto,
+                shape = MaterialTheme.shapes.medium,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(if (isProcessingPhoto) "Memproses watermark..." else "Ambil Gambar")
@@ -538,6 +589,7 @@ fun PendataanFormScreen(
             errorMessage?.let {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.medium,
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.errorContainer
                     )
@@ -554,6 +606,7 @@ fun PendataanFormScreen(
             Button(
                 onClick = { save(asDraft = false) },
                 enabled = !isSaving && !isProcessingPhoto && isCompleteEnough,
+                shape = MaterialTheme.shapes.medium,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(if (isSaving) "Menyimpan..." else "Simpan")
@@ -561,11 +614,50 @@ fun PendataanFormScreen(
             OutlinedButton(
                 onClick = { save(asDraft = true) },
                 enabled = !isSaving && !isProcessingPhoto,
+                shape = MaterialTheme.shapes.medium,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Simpan sebagai Draf")
             }
             Spacer(modifier = Modifier.height(24.dp))
+        }
+    }
+}
+
+@Composable
+private fun FormSectionHeader(
+    number: String,
+    title: String,
+    subtitle: String
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(50),
+            color = MaterialTheme.colorScheme.primaryContainer
+        ) {
+            Text(
+                text = number,
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -583,15 +675,54 @@ private fun LocationSummary(
             timeZone = TimeZone.getTimeZone("Asia/Makassar")
         }.format(Date(location.capturedAtEpochMillis))
     }
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        border = BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.secondary.copy(alpha = 0.22f)
+        ),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.42f)
+        )
+    ) {
         Column(
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Text("Latitude: ${formatCoordinate(location.latitude)}")
-            Text("Longitude: ${formatCoordinate(location.longitude)}")
-            Text("Akurasi: ${location.accuracyM?.let { "%.1f m".format(it) } ?: "--"}")
-            Text("Waktu: $timestamp")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Titik lokasi tersimpan",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.secondary
+                ) {
+                    Text(
+                        text = "GPS",
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSecondary,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+            Text(
+                "${formatCoordinate(location.latitude)}, ${formatCoordinate(location.longitude)}",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                "Akurasi: ${location.accuracyM?.let { "%.1f m".format(it) } ?: "--"}  •  $timestamp",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             audit?.warningMessage?.let {
                 Text(
                     text = it,
@@ -617,6 +748,11 @@ private fun FormChoiceDropdown(
     Box(modifier = Modifier.fillMaxWidth()) {
         OutlinedButton(
             onClick = { expanded = true },
+            shape = MaterialTheme.shapes.medium,
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                horizontal = 16.dp,
+                vertical = 9.dp
+            ),
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
@@ -660,7 +796,11 @@ private fun PhotoPreview(
     }
     Card(
         modifier = Modifier.width(104.dp),
-        shape = RoundedCornerShape(8.dp)
+        shape = MaterialTheme.shapes.medium,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        )
     ) {
         Column(
             modifier = Modifier.padding(4.dp),
@@ -672,7 +812,7 @@ private fun PhotoPreview(
                     contentDescription = "Pratinjau foto ${index + 1}",
                     modifier = Modifier
                         .size(94.dp)
-                        .clip(RoundedCornerShape(6.dp))
+                        .clip(MaterialTheme.shapes.small)
                 )
             } else {
                 Box(

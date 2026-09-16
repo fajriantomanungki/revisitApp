@@ -11,6 +11,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -407,6 +408,15 @@ private fun WilayahDropdown(
             singleLine = true,
             label = { Text(label) },
             placeholder = { Text("Ketik kode atau nama untuk mencari") },
+            shape = MaterialTheme.shapes.medium,
+            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                focusedLabelColor = MaterialTheme.colorScheme.primary,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                disabledBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f),
+                disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                disabledTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+            ),
             trailingIcon = {
                 ExposedDropdownMenuDefaults.TrailingIcon(
                     expanded = expanded
@@ -471,9 +481,18 @@ private fun ReadOnlyRegionNameField(
         enabled = enabled,
         singleLine = true,
         label = { Text(label) },
+        placeholder = { Text("Terisi otomatis dari master") },
         supportingText = {
             Text("Terisi otomatis dari master wilayah")
         },
+        shape = MaterialTheme.shapes.medium,
+        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = MaterialTheme.colorScheme.secondary,
+            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+            disabledBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f),
+            disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            disabledTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+        ),
         modifier = Modifier.fillMaxWidth()
     )
 }

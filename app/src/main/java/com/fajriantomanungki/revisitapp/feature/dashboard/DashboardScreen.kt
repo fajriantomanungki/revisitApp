@@ -7,6 +7,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Typeface
 import androidx.annotation.ColorInt
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -31,12 +32,15 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -50,6 +54,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -289,18 +294,31 @@ private fun DashboardContent(
         modifier = modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
-                title = { Text("Dashboard Cakupan SLS") },
+                title = {
+                    Column {
+                        Text("Cakupan Lapangan")
+                        Text(
+                            text = "Pantau progres SLS secara offline",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
                 actions = {
                     if (onRefreshCoverage != null) {
                         OutlinedButton(
                             onClick = onRefreshCoverage,
                             enabled = !isRefreshing,
+                            shape = MaterialTheme.shapes.medium,
                             modifier = Modifier.padding(end = 8.dp)
                         ) {
                             Text(if (isRefreshing) "Memperbarui..." else "Perbarui")
                         }
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background
+                )
             )
         }
     ) { paddingValues ->
@@ -390,35 +408,115 @@ private fun DashboardSummary(
     localPendingTotal: Long,
     lastServerSyncMillis: Long?
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
+    val validCoverage = coverage.filter { it.targetValid }
+    val totalTarget = validCoverage.sumOf { it.targetResponden }
+    val totalRecorded = coverage.sumOf { it.jumlahTerdata.coerceAtLeast(0L) }
+    val completedSls = validCoverage.count { it.coverageRatio >= 1.0 }
+    val overallProgress = if (totalTarget > 0L) {
+        (totalRecorded.toDouble() / totalTarget.toDouble())
+            .coerceIn(0.0, 1.0)
+            .toFloat()
+    } else {
+        0f
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.large)
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(
+                        MaterialTheme.colorScheme.primary,
+                        MaterialTheme.colorScheme.secondary
+                    )
+                )
+            )
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
                 text = "Ringkasan cakupan",
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onPrimary
             )
             Text(
                 text = coverage.size.toString() + " SLS ditampilkan • " +
-                    coverage.count { it.targetValid && it.coverageRatio >= 1.0 }.toString() +
-                    " sudah mencapai target"
+                    completedSls.toString() +
+                    " sudah mencapai target",
+                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.84f),
+                style = MaterialTheme.typography.bodyMedium
             )
-            Text(
-                text = "Entri lokal belum terkirim: " +
-                    formatInteger(localPendingTotal)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            )
+            {
+                DashboardMetric(
+                    label = "Terdata",
+                    value = formatInteger(totalRecorded),
+                    modifier = Modifier.weight(1f)
+                )
+                DashboardMetric(
+                    label = "Target",
+                    value = formatInteger(totalTarget),
+                    modifier = Modifier.weight(1f)
+                )
+                DashboardMetric(
+                    label = "Lokal",
+                    value = formatInteger(localPendingTotal),
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            LinearProgressIndicator(
+                progress = overallProgress,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(7.dp)
+                    .clip(RoundedCornerShape(50)),
+                color = MaterialTheme.colorScheme.tertiary,
+                trackColor = Color.White.copy(alpha = 0.2f)
             )
             Text(
                 text = lastServerSyncMillis
                     ?.takeIf { it > 0L }
-                    ?.let { "Data per: " + formatDateTime(it) }
-                    ?: "Data server belum pernah disinkronkan"
+                    ?.let { "Sinkron terakhir: " + formatDateTime(it) }
+                    ?: "Data server belum pernah disinkronkan",
+                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.78f),
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+    }
+}
+
+@Composable
+private fun DashboardMetric(
+    label: String,
+    value: String,
+    modifier: Modifier
+) {
+    Surface(
+        modifier = modifier,
+        shape = MaterialTheme.shapes.medium,
+        color = Color.White.copy(alpha = 0.14f)
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.White.copy(alpha = 0.78f)
+            )
+            Text(
+                text = value,
+                style = MaterialTheme.typography.titleMedium,
+                color = Color.White,
+                fontWeight = FontWeight.Bold
             )
         }
     }
@@ -436,48 +534,66 @@ private fun DashboardFilters(
     showOnlyAssigned: Boolean,
     onOnlyAssignedChanged: (Boolean) -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            text = "Filter wilayah",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
         )
-        DashboardDropdown(
-            label = "Kecamatan",
-            selectedLabel = kecOptions
-                .firstOrNull { it.code == selectedKecCode }
-                ?.label,
-            options = kecOptions,
-            onSelected = onKecSelected
-        )
-        DashboardDropdown(
-            label = "Desa",
-            selectedLabel = desaOptions
-                .firstOrNull { it.code == selectedDesaCode }
-                ?.label,
-            options = desaOptions,
-            onSelected = onDesaSelected
-        )
-        if (assignedSlsCodes != null) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Hanya wilayah penugasan saya",
-                        fontWeight = FontWeight.Medium
-                    )
-                    Text(
-                        text = "Batasi marker dan daftar ke SLS yang ditugaskan.",
-                        style = MaterialTheme.typography.bodySmall
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "Filter wilayah",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "Persempit tampilan peta berdasarkan wilayah kerja.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            DashboardDropdown(
+                label = "Kecamatan",
+                selectedLabel = kecOptions
+                    .firstOrNull { it.code == selectedKecCode }
+                    ?.label,
+                options = kecOptions,
+                onSelected = onKecSelected
+            )
+            DashboardDropdown(
+                label = "Desa",
+                selectedLabel = desaOptions
+                    .firstOrNull { it.code == selectedDesaCode }
+                    ?.label,
+                options = desaOptions,
+                onSelected = onDesaSelected
+            )
+            if (assignedSlsCodes != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Hanya wilayah penugasan saya",
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = "Batasi marker dan daftar ke SLS yang ditugaskan.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = showOnlyAssigned,
+                        onCheckedChange = onOnlyAssignedChanged
                     )
                 }
-                Switch(
-                    checked = showOnlyAssigned,
-                    onCheckedChange = onOnlyAssignedChanged
-                )
             }
         }
     }
@@ -505,6 +621,7 @@ private fun DashboardDropdown(
         Box {
             OutlinedButton(
                 onClick = { expanded = true },
+                shape = MaterialTheme.shapes.medium,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
@@ -542,33 +659,44 @@ private fun DashboardDropdown(
 
 @Composable
 private fun CoverageLegend() {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            text = "Legenda cakupan",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
         )
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            CoverageClass.values().forEach { coverageClass ->
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(14.dp)
-                            .clip(CircleShape)
-                            .background(Color(coverageClass.colorArgb))
-                    )
-                    Text(
-                        text = coverageClass.label,
-                        style = MaterialTheme.typography.bodySmall
-                    )
+            Text(
+                text = "Legenda cakupan",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                CoverageClass.values().forEach { coverageClass ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(14.dp)
+                                .clip(CircleShape)
+                                .background(Color(coverageClass.colorArgb))
+                        )
+                        Text(
+                            text = coverageClass.label,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                 }
             }
         }
@@ -657,6 +785,11 @@ private fun SlsDetailCard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        border = BorderStroke(
+            1.dp,
+            Color(item.coverageClass.colorArgb).copy(alpha = 0.28f)
+        ),
         colors = CardDefaults.cardColors(
             containerColor = Color(item.coverageClass.colorArgb).copy(alpha = 0.14f)
         )
@@ -665,17 +798,59 @@ private fun SlsDetailCard(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = item.namaSls,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = item.kodeSls,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = Color(item.coverageClass.colorArgb).copy(alpha = 0.2f)
+                ) {
+                    Text(
+                        text = formatCoverage(item),
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(item.coverageClass.colorArgb),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
             Text(
-                text = item.namaSls,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
+                text = item.namaDesa + " • " + item.namaKec,
+                style = MaterialTheme.typography.bodyMedium
             )
-            Text(item.kodeSls)
-            Text(item.namaDesa + " • " + item.namaKec)
             Text(
                 text = "Target: " + formatInteger(item.targetResponden) +
                     " • Terdata: " + formatInteger(item.jumlahTerdata) +
-                    " (" + formatCoverage(item) + ")"
+                    " (" + formatCoverage(item) + ")",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            LinearProgressIndicator(
+                progress = if (item.targetValid) {
+                    item.coverageRatio.coerceIn(0.0, 1.0).toFloat()
+                } else {
+                    0f
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(50)),
+                color = Color(item.coverageClass.colorArgb),
+                trackColor = Color(item.coverageClass.colorArgb).copy(alpha = 0.18f)
             )
             if (item.jumlahLokalBelumTerkirim > 0L) {
                 Text(
@@ -692,12 +867,14 @@ private fun SlsDetailCard(
                 Button(
                     onClick = onNavigate,
                     enabled = item.hasValidCentroid,
+                    shape = MaterialTheme.shapes.medium,
                     modifier = Modifier.weight(1f)
                 ) {
                     Text("Navigasi")
                 }
                 OutlinedButton(
                     onClick = onOpenSlsData,
+                    shape = MaterialTheme.shapes.medium,
                     modifier = Modifier.weight(1f)
                 ) {
                     Text("Data di SLS ini")
@@ -721,7 +898,13 @@ private fun LowestCoverageList(
         if (items.isEmpty()) {
             Text("Belum ada data SLS untuk ditampilkan.")
         } else {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.large,
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
+            ) {
                 Column {
                     items.forEachIndexed { index, item ->
                         Row(
