@@ -12,8 +12,11 @@ import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.fajriantomanungki.revisitapp.data.local.dao.FotoDao
+import com.fajriantomanungki.revisitapp.data.local.dao.LaporanKegiatanDao
 import com.fajriantomanungki.revisitapp.data.local.dao.PendataanDao
 import com.fajriantomanungki.revisitapp.data.local.entity.PendataanEntity
+import com.fajriantomanungki.revisitapp.data.local.entity.LaporanKegiatanEntity
+import com.fajriantomanungki.revisitapp.data.local.model.LaporanKegiatanStatus
 import com.fajriantomanungki.revisitapp.data.local.model.SyncStatus
 import com.fajriantomanungki.revisitapp.data.sync.AppsScriptApi
 import com.fajriantomanungki.revisitapp.data.sync.AppsScriptApiException
@@ -59,6 +62,7 @@ class SyncWorker @AssistedInject constructor(
     @Assisted workerParams: WorkerParameters,
     private val pendataanDao: PendataanDao,
     private val fotoDao: FotoDao,
+    private val laporanKegiatanDao: LaporanKegiatanDao,
     private val appsScriptApi: AppsScriptApi,
     private val syncConfigStore: SyncConfigStore
 ) : CoroutineWorker(appContext, workerParams) {
@@ -89,13 +93,21 @@ class SyncWorker @AssistedInject constructor(
             waktuDiubah = System.currentTimeMillis()
         )
 
+        laporanKegiatanDao.recoverInterruptedSync(
+            idPetugas = idPetugas,
+            pesanError = "Sinkronisasi laporan sebelumnya terhenti dan akan dicoba ulang",
+            waktuDiubah = System.currentTimeMillis()
+        )
+
         val pendingRecords = pendataanDao.getAllForSync(idPetugas)
-        if (pendingRecords.isEmpty()) {
+        val pendingReports = laporanKegiatanDao.getForSync(idPetugas)
+        if (pendingRecords.isEmpty() && pendingReports.isEmpty()) {
             publishProgress(processed = 0, total = 0)
             return Result.success()
         }
 
-        publishProgress(processed = 0, total = pendingRecords.size)
+        val totalWork = pendingRecords.size + pendingReports.size
+        publishProgress(processed = 0, total = totalWork)
         val currentAttempt = runAttemptCount + 1
         var processed = 0
 
@@ -107,7 +119,7 @@ class SyncWorker @AssistedInject constructor(
                 currentAttempt = currentAttempt
             )
             processed += batch.size
-            publishProgress(processed = processed, total = pendingRecords.size)
+            publishProgress(processed = processed, total = totalWork)
 
             val retryableError = outcome.retryableError ?: return@forEach
             val errorMessage = readableError(retryableError)
@@ -128,10 +140,35 @@ class SyncWorker @AssistedInject constructor(
             return failureResult(errorMessage)
         }
 
+        pendingReports.chunked(MAX_BATCH_SIZE).forEach { batch ->
+            val outcome = processReportBatch(
+                config = config,
+                idPetugas = idPetugas,
+                batch = batch,
+                currentAttempt = currentAttempt
+            )
+            processed += batch.size
+            publishProgress(processed = processed, total = totalWork)
+
+            val retryableError = outcome.retryableError ?: return@forEach
+            val errorMessage = readableError(retryableError)
+
+            if (runAttemptCount < MAX_ATTEMPTS_PER_SESSION - 1) {
+                return Result.retry()
+            }
+
+            markRemainingReportsAsFailed(
+                reports = pendingReports,
+                message = errorMessage,
+                attempt = currentAttempt
+            )
+            return failureResult(errorMessage)
+        }
+
         return Result.success(
             workDataOf(
                 KEY_PROCESSED to processed,
-                KEY_TOTAL to pendingRecords.size,
+                KEY_TOTAL to totalWork,
                 KEY_MESSAGE to "Sinkronisasi selesai"
             )
         )
@@ -233,6 +270,78 @@ class SyncWorker @AssistedInject constructor(
             }
         }
 
+        return BatchOutcome(retryableError)
+    }
+
+    private suspend fun processReportBatch(
+        config: SyncConfig,
+        idPetugas: String,
+        batch: List<LaporanKegiatanEntity>,
+        currentAttempt: Int
+    ): BatchOutcome {
+        val ready = ArrayList<LaporanKegiatanEntity>(batch.size)
+        var retryableError: Throwable? = null
+
+        batch.forEach { report ->
+            val attempt = maxOf(currentAttempt, report.percobaanKirim + 1)
+            val marked = laporanKegiatanDao.markSending(
+                idLaporan = report.idLaporan,
+                percobaanKirim = attempt,
+                waktuDiubah = System.currentTimeMillis()
+            )
+            if (marked > 0) ready += report
+        }
+        if (ready.isEmpty()) return BatchOutcome()
+
+        try {
+            val response = appsScriptApi.syncDailyReports(
+                config = config,
+                idPetugas = idPetugas,
+                reports = ready
+            )
+            val resultsByReport = response.results.associateBy { it.idLaporan }
+            ready.forEach { report ->
+                val attempt = maxOf(currentAttempt, report.percobaanKirim + 1)
+                val remote = resultsByReport[report.idLaporan]
+                if (remote == null) {
+                    val error = AppsScriptApiException(
+                        message = "Server tidak mengembalikan hasil laporan ${report.idLaporan}",
+                        errorCode = "HASIL_TIDAK_LENGKAP",
+                        retryable = true
+                    )
+                    markReportFailed(report, attempt, readableError(error))
+                    if (retryableError == null) retryableError = error
+                } else if (remote.status == LaporanKegiatanStatus.TERKIRIM) {
+                    laporanKegiatanDao.saveSyncResult(
+                        idLaporan = report.idLaporan,
+                        statusKirim = LaporanKegiatanStatus.TERKIRIM,
+                        pesanError = null,
+                        percobaanKirim = attempt,
+                        waktuTerkirim = System.currentTimeMillis(),
+                        waktuDiubah = System.currentTimeMillis()
+                    )
+                } else {
+                    markReportFailed(
+                        report,
+                        attempt,
+                        remote.message ?: "Server menandai laporan sebagai GAGAL"
+                    )
+                }
+            }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Exception) {
+            ready.forEach { report ->
+                markReportFailed(
+                    report,
+                    maxOf(currentAttempt, report.percobaanKirim + 1),
+                    readableError(error)
+                )
+            }
+            if (isRetryable(error) && retryableError == null) {
+                retryableError = error
+            }
+        }
         return BatchOutcome(retryableError)
     }
 
@@ -353,6 +462,42 @@ class SyncWorker @AssistedInject constructor(
             }
             markFailed(
                 record = current,
+                attempt = maxOf(attempt, current.percobaanKirim + 1),
+                message = message
+            )
+        }
+    }
+
+    private suspend fun markReportFailed(
+        report: LaporanKegiatanEntity,
+        attempt: Int,
+        message: String
+    ) {
+        laporanKegiatanDao.saveSyncResult(
+            idLaporan = report.idLaporan,
+            statusKirim = LaporanKegiatanStatus.GAGAL,
+            pesanError = message.take(MAX_ERROR_LENGTH),
+            percobaanKirim = attempt,
+            waktuTerkirim = null,
+            waktuDiubah = System.currentTimeMillis()
+        )
+    }
+
+    private suspend fun markRemainingReportsAsFailed(
+        reports: List<LaporanKegiatanEntity>,
+        message: String,
+        attempt: Int
+    ) {
+        reports.forEach { snapshot ->
+            val current = laporanKegiatanDao.getByDate(snapshot.idPetugas, snapshot.tanggal)
+                ?: return@forEach
+            if (current.statusKirim == LaporanKegiatanStatus.TERKIRIM ||
+                current.statusKirim == LaporanKegiatanStatus.GAGAL
+            ) {
+                return@forEach
+            }
+            markReportFailed(
+                report = current,
                 attempt = maxOf(attempt, current.percobaanKirim + 1),
                 message = message
             )

@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.fajriantomanungki.revisitapp.data.local.dao.CakupanCacheDao
 import com.fajriantomanungki.revisitapp.data.local.dao.FotoDao
+import com.fajriantomanungki.revisitapp.data.local.dao.LaporanKegiatanDao
 import com.fajriantomanungki.revisitapp.data.local.dao.PendataanDao
 import com.fajriantomanungki.revisitapp.data.local.dao.WilayahDao
 import dagger.Module
@@ -34,7 +35,8 @@ object DatabaseModule {
             AppDatabase.DATABASE_NAME
         ).addMigrations(
             AppDatabase.MIGRATION_1_2,
-            AppDatabase.MIGRATION_2_3
+            AppDatabase.MIGRATION_2_3,
+            AppDatabase.MIGRATION_3_4
         ).build()
     }
 
@@ -56,5 +58,10 @@ object DatabaseModule {
     @Provides
     fun provideCakupanCacheDao(database: AppDatabase): CakupanCacheDao {
         return database.cakupanCacheDao()
+    }
+
+    @Provides
+    fun provideLaporanKegiatanDao(database: AppDatabase): LaporanKegiatanDao {
+        return database.laporanKegiatanDao()
     }
 }

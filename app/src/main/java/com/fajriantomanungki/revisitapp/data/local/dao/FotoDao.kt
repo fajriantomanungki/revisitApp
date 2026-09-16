@@ -72,6 +72,7 @@ interface FotoDao {
         WHERE p.status_kirim = 'TERKIRIM'
           AND p.waktu_terkirim IS NOT NULL
           AND p.waktu_terkirim <= :cutoffMillis
+          AND f.path_lokal <> ''
         ORDER BY p.waktu_terkirim ASC
         """
     )
@@ -81,6 +82,10 @@ interface FotoDao {
 
     @Delete
     suspend fun deleteAll(rows: List<FotoEntity>): Int
+
+    /** Menghapus salinan lokal tetapi mempertahankan drive_file_id untuk edit ulang. */
+    @Query("UPDATE foto SET path_lokal = '' WHERE id_foto = :idFoto")
+    suspend fun clearLocalPath(idFoto: String): Int
 
     @Query("DELETE FROM foto WHERE id_record = :idRecord")
     suspend fun deleteByRecord(idRecord: String): Int

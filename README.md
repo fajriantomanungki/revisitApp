@@ -27,6 +27,12 @@ dahulu. `SyncWorker` mengunggah foto lalu metadata secara batch maksimal 20
 record ketika jaringan tersedia. PIN mentah tidak disimpan; login offline
 menggunakan digest SHA-256 terenkripsi.
 
+Menu Android terdiri dari Pendataan, Laporan Kegiatan, dan Dashboard. Master
+wilayah tetap diunduh otomatis untuk kebutuhan selector wilayah, tetapi tidak
+lagi ditampilkan sebagai halaman tersendiri. Setiap hasil pendataan dapat
+diedit; edit terhadap record yang sudah terkirim memakai UUID yang sama dan
+akan dikirim ulang sebagai pembaruan idempoten.
+
 ## Menyiapkan Apps Script
 
 1. Salin `Code.gs` dan `Dashboard.html` ke project Apps Script.
@@ -65,30 +71,44 @@ sheet assignment legacy. Nilai `kode_kabupaten` serta `kabupaten` setiap
 petugas harus diisi manual melalui dashboard karena tidak dapat disimpulkan
 secara aman dari assignment lama.
 
-Database Room Android naik ke versi 3 melalui migration yang mempertahankan
-data lokal, menambahkan county pada `pendataan`, dan menghapus kolom centroid
-dari tabel `wilayah`.
+Database Room Android naik ke versi 4 melalui migration yang mempertahankan
+data lokal, menambahkan county pada `pendataan`, serta tabel
+`laporan_kegiatan` untuk rangkuman harian.
 
 ## Dashboard web dan laporan PDF
 
 Dashboard memakai Spreadsheet yang sama:
 
 ```text
-https://script.google.com/macros/s/DEPLOYMENT_ID/exec?page=dashboard&admin_token=DASHBOARD_TOKEN
+https://script.google.com/macros/s/DEPLOYMENT_ID/exec?page=dashboard
 ```
+
+Parameter `admin_token` tetap didukung untuk kompatibilitas deployment lama,
+tetapi akses normal menggunakan login pada halaman dashboard.
 
 Tambahkan Script Properties berikut:
 
 ```text
 DASHBOARD_TOKEN = token dashboard, berbeda dari API_TOKEN
 ADMIN_EMAILS = email admin dipisahkan koma
-REPORT_FOLDER_ID = folder Drive laporan PDF (opsional)
+REPORT_FOLDER_ID = folder Drive laporan PDF (opsional; fallback ke DRIVE_FOLDER_ID)
 ```
 
 Dashboard menampilkan target/realisasi per kabupaten, kecamatan, dan petugas;
-menyediakan manajemen petugas, import master, serta laporan PDF per petugas.
+menyediakan manajemen petugas, import master, laporan PDF per petugas, dan
+laporan kegiatan harian. Dashboard memiliki login username/password berbasis
+sheet `admin`; `setupBackend()` membuat akun awal `manungki.fajri` dengan
+password `1234`. Segera daftarkan akun admin pengganti melalui menu Admin.
 Target kabupaten dihitung sebagai jumlah petugas aktif × 126. Laporan PDF
-hanya memuat record yang sudah masuk ke Spreadsheet.
+hanya memuat record yang sudah masuk ke Spreadsheet. Laporan kegiatan
+menggabungkan tanggal, daftar hasil pendataan, rangkuman harian, dan foto Drive.
+
+Sheet tambahan yang dibuat oleh `setupBackend()`:
+
+```text
+laporan_kegiatan: id_laporan,id_petugas,kode_kab,kabupaten,tanggal,rangkuman,status_kirim,waktu_diterima_server,versi_app
+admin: username,nama,password_hash,aktif,created_at,updated_at
+```
 
 Setelah memperbarui Apps Script, deploy versi Web App terbaru. Build Android
 di GitHub Actions dijalankan pada setiap push ke `main` dan pull request.

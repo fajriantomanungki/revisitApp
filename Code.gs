@@ -8,6 +8,7 @@
  *   GET  /exec?page=dashboard&admin_token=...
  *   POST /exec  { action: "upload_foto", ... }
  *   POST /exec  { action: "sync", ... }
+ *   POST /exec  { action: "sync_laporan_kegiatan", ... }
  *   POST /exec  { action: "login", ... }
  *
  * Konfigurasi wajib diletakkan pada Script Properties:
@@ -56,6 +57,8 @@ var CONFIG = {
     PETUGAS: 'petugas',
     MASTER_WILAYAH: 'master_wilayah',
     PENDATAAN: 'pendataan',
+    LAPORAN_KEGIATAN: 'laporan_kegiatan',
+    ADMIN: 'admin',
     REKAP_CAKUPAN: 'rekap_cakupan',
     LOG_SYNC: 'log_sync'
   }
@@ -122,6 +125,25 @@ var SHEET_HEADERS = {
     'jumlah_record',
     'status',
     'keterangan'
+  ],
+  LAPORAN_KEGIATAN: [
+    'id_laporan',
+    'id_petugas',
+    'kode_kab',
+    'kabupaten',
+    'tanggal',
+    'rangkuman',
+    'status_kirim',
+    'waktu_diterima_server',
+    'versi_app'
+  ],
+  ADMIN: [
+    'username',
+    'nama',
+    'password_hash',
+    'aktif',
+    'created_at',
+    'updated_at'
   ]
 };
 
@@ -219,9 +241,13 @@ function doPost(e) {
       return handleSync_(payload);
     }
 
+    if (action === 'sync_laporan_kegiatan') {
+      return handleSyncLaporanKegiatan_(payload);
+    }
+
     throw new ApiError(
       'ACTION_TIDAK_DIDUKUNG',
-      'Action POST tidak didukung. Gunakan upload_foto atau sync.'
+      'Action POST tidak didukung. Gunakan upload_foto, sync, atau sync_laporan_kegiatan.'
     );
   } catch (error) {
     return errorResponseFromException_(error, 'doPost');
@@ -494,6 +520,7 @@ function handleSync_(payload) {
     var reservedIds = {};
     var results = [];
     var pendingRows = [];
+    var pendingUpdates = [];
     var nowMs = new Date().getTime();
 
     records.forEach(function(record) {
@@ -511,21 +538,60 @@ function handleSync_(payload) {
         idRecord = requireUuidV4_(idRecord, 'id_record');
         result.id_record = idRecord;
 
-        /*
-         * Untuk retry, record yang telah tersimpan langsung dikonfirmasi
-         * tanpa append ulang. Ini adalah inti idempotensi server.
-         */
-        if (existingIds[idRecord]) {
-          result.status = 'TERKIRIM';
-          result.duplikat = true;
-          return;
-        }
-
         if (reservedIds[idRecord]) {
           throw new ApiError(
             'DUPLIKAT_DALAM_BATCH',
             'id_record yang sama muncul lebih dari satu kali dalam batch.'
           );
+        }
+
+        /*
+         * Retry biasa hanya dikonfirmasi tanpa append ulang. Edit terhadap
+         * record TERKIRIM mengirim replace_existing=true dan memperbarui
+         * baris lama dengan UUID yang sama agar dashboard tidak menghitung
+         * record kedua.
+         */
+        if (existingIds[idRecord]) {
+          var replaceExisting = normalizeBoolean_(
+            record.replace_existing,
+            'replace_existing',
+            false
+          );
+          if (!replaceExisting) {
+            result.status = 'TERKIRIM';
+            result.duplikat = true;
+            reservedIds[idRecord] = true;
+            return;
+          }
+
+          var existingRowNumber = existingIds[idRecord].rowNumber;
+          var workerColumn = headers.indexOf('id_petugas');
+          var existingWorker = workerColumn >= 0
+            ? toText_(sheet.getRange(existingRowNumber, workerColumn + 1).getValue())
+            : '';
+          if (
+            existingWorker.toLowerCase() !== idPetugas.toLowerCase()
+          ) {
+            throw new ApiError(
+              'PETUGAS_TIDAK_SESUAI',
+              'Record hanya dapat diperbarui oleh petugas pemiliknya.'
+            );
+          }
+
+          var updatedRecord = normalizeRecordForSync_(
+            record,
+            idPetugas,
+            worker,
+            masterIndex,
+            nowMs
+          );
+          pendingUpdates.push({
+            result: result,
+            rowNumber: existingRowNumber,
+            row: buildPendataanRow_(updatedRecord, headers)
+          });
+          reservedIds[idRecord] = true;
+          return;
         }
 
         var normalized = normalizeRecordForSync_(
@@ -546,6 +612,23 @@ function handleSync_(payload) {
         result.pesan = publicErrorMessage_(recordError);
       }
     });
+
+    if (pendingUpdates.length > 0) {
+      pendingUpdates.forEach(function(item) {
+        try {
+          sheet
+            .getRange(item.rowNumber, 1, 1, headers.length)
+            .setValues([item.row]);
+          item.result.status = 'TERKIRIM';
+          item.result.diperbarui = true;
+        } catch (updateError) {
+          item.result.status = 'GAGAL';
+          item.result.pesan =
+            'Gagal memperbarui Spreadsheet: ' +
+            publicErrorMessage_(updateError);
+        }
+      });
+    }
 
     if (pendingRows.length > 0) {
       var values = pendingRows.map(function(item) {
@@ -587,7 +670,9 @@ function handleSync_(payload) {
      * Sheet rekap adalah sheet turunan. Kegagalannya tidak boleh mengubah
      * record yang sudah berhasil disimpan di sheet pendataan menjadi gagal.
      */
-    if (pendingRows.some(function(item) {
+    if (pendingUpdates.some(function(item) {
+      return item.result.status === 'TERKIRIM';
+    }) || pendingRows.some(function(item) {
       return item.result.status === 'TERKIRIM';
     })) {
       try {
@@ -618,6 +703,251 @@ function handleSync_(payload) {
   } finally {
     lock.releaseLock();
   }
+}
+
+/**
+ * Handler POST action=sync_laporan_kegiatan.
+ *
+ * Laporan harian di-upsert berdasarkan id_laporan atau pasangan
+ * id_petugas+tanggal. Dengan begitu petugas dapat memperbaiki rangkuman yang
+ * sudah pernah terkirim tanpa membuat laporan ganda di Spreadsheet.
+ */
+function handleSyncLaporanKegiatan_(payload) {
+  var idPetugas = requireString_(
+    payload.id_petugas,
+    'id_petugas',
+    100
+  );
+  var reports = payload.laporan || payload.reports;
+
+  if (!Array.isArray(reports) || reports.length === 0) {
+    throw new ApiError(
+      'LAPORAN_TIDAK_VALID',
+      'Field laporan harus berupa array dan tidak boleh kosong.'
+    );
+  }
+  if (reports.length > CONFIG.MAX_SYNC_RECORDS) {
+    throw new ApiError(
+      'BATCH_TERLALU_BESAR',
+      'Maksimal 20 laporan per request.'
+    );
+  }
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(CONFIG.LOCK_TIMEOUT_MS)) {
+    throw new ApiError(
+      'SERVER_SIBUK',
+      'Server sedang memproses request lain. Silakan coba lagi.'
+    );
+  }
+
+  try {
+    var worker = getActiveWorkerById_(idPetugas);
+    var sheet = getSheetOrThrow_(CONFIG.SHEETS.LAPORAN_KEGIATAN);
+    var headers = getSheetHeaders_(sheet);
+    assertRequiredHeaders_(
+      headers,
+      SHEET_HEADERS.LAPORAN_KEGIATAN,
+      CONFIG.SHEETS.LAPORAN_KEGIATAN
+    );
+
+    var existing = {};
+    var existingByDate = {};
+    readSheetObjectRowsWithNumbers_(sheet).forEach(function(item) {
+      var object = item.object;
+      var id = toText_(object.id_laporan).toLowerCase();
+      if (id) existing[id] = item;
+
+      var workerKey = toText_(object.id_petugas).toLowerCase();
+      var dateKey = toText_(object.tanggal);
+      if (workerKey && dateKey) {
+        existingByDate[workerKey + '|' + dateKey] = item;
+      }
+    });
+
+    var results = [];
+    var pendingUpdates = [];
+    var pendingRows = [];
+    var reserved = {};
+    var reservedDates = {};
+    var now = new Date();
+
+    reports.forEach(function(report) {
+      var rawId = report && report.id_laporan
+        ? String(report.id_laporan).trim()
+        : '';
+      var result = {
+        id_laporan: rawId,
+        status: 'GAGAL'
+      };
+      results.push(result);
+
+      try {
+        var idLaporan = requireUuidV4_(rawId, 'id_laporan');
+        result.id_laporan = idLaporan;
+        var key = idLaporan.toLowerCase();
+        if (reserved[key]) {
+          throw new ApiError(
+            'DUPLIKAT_DALAM_BATCH',
+            'id_laporan yang sama muncul lebih dari satu kali dalam batch.'
+          );
+        }
+        reserved[key] = true;
+
+        var reportWorker = toText_(report.id_petugas);
+        if (reportWorker && reportWorker !== idPetugas) {
+          throw new ApiError(
+            'PETUGAS_TIDAK_SESUAI',
+            'id_petugas pada laporan berbeda dengan request.'
+          );
+        }
+        var tanggal = normalizeDateOnly_(report.tanggal, 'tanggal');
+        var dateKey = idPetugas.toLowerCase() + '|' + tanggal;
+        if (reservedDates[dateKey]) {
+          throw new ApiError(
+            'DUPLIKAT_TANGGAL_DALAM_BATCH',
+            'Satu petugas hanya dapat memiliki satu laporan per tanggal.'
+          );
+        }
+        reservedDates[dateKey] = true;
+        var rangkuman = requireString_(report.rangkuman, 'rangkuman', 5000);
+        var versiApp = optionalString_(report.versi_app, 'versi_app', 50);
+        var row = buildLaporanKegiatanRow_({
+          id_laporan: idLaporan,
+          id_petugas: idPetugas,
+          kode_kab: getWorkerCountyCode_(worker),
+          kabupaten: getWorkerCountyName_(worker),
+          tanggal: tanggal,
+          rangkuman: rangkuman,
+          status_kirim: 'TERKIRIM',
+          waktu_diterima_server: now,
+          versi_app: versiApp
+        }, headers);
+
+        var existingById = existing[key] || null;
+        var existingByDateRow = existingByDate[dateKey] || null;
+        if (
+          existingById &&
+          existingByDateRow &&
+          existingById.rowNumber !== existingByDateRow.rowNumber
+        ) {
+          throw new ApiError(
+            'LAPORAN_DUPLIKAT_SERVER',
+            'Spreadsheet memiliki lebih dari satu laporan untuk petugas dan tanggal tersebut.'
+          );
+        }
+
+        var existingRow = existingById || existingByDateRow;
+        if (existingRow) {
+          var existingWorker = toText_(existingRow.object.id_petugas);
+          if (existingWorker.toLowerCase() !== idPetugas.toLowerCase()) {
+            throw new ApiError(
+              'PETUGAS_TIDAK_SESUAI',
+              'Laporan hanya dapat diperbarui oleh petugas pemiliknya.'
+            );
+          }
+          pendingUpdates.push({
+            result: result,
+            rowNumber: existingRow.rowNumber,
+            row: row
+          });
+        } else {
+          pendingRows.push({result: result, row: row});
+        }
+      } catch (reportError) {
+        result.pesan = publicErrorMessage_(reportError);
+      }
+    });
+
+    pendingUpdates.forEach(function(item) {
+      try {
+        sheet
+          .getRange(item.rowNumber, 1, 1, headers.length)
+          .setValues([item.row]);
+        item.result.status = 'TERKIRIM';
+        item.result.diperbarui = true;
+      } catch (error) {
+        item.result.pesan =
+          'Gagal memperbarui laporan di Spreadsheet: ' +
+          publicErrorMessage_(error);
+      }
+    });
+
+    if (pendingRows.length > 0) {
+      try {
+        sheet
+          .getRange(
+            sheet.getLastRow() + 1,
+            1,
+            pendingRows.length,
+            headers.length
+          )
+          .setValues(pendingRows.map(function(item) { return item.row; }));
+        pendingRows.forEach(function(item) {
+          item.result.status = 'TERKIRIM';
+        });
+      } catch (error) {
+        pendingRows.forEach(function(item) {
+          item.result.pesan =
+            'Gagal menulis laporan ke Spreadsheet: ' +
+            publicErrorMessage_(error);
+        });
+      }
+    }
+
+    var successCount = results.filter(function(item) {
+      return item.status === 'TERKIRIM';
+    }).length;
+    var failureCount = results.length - successCount;
+    tryLogSyncUnlocked_(
+      idPetugas,
+      reports.length,
+      failureCount === 0 ? 'SUKSES' : successCount > 0 ? 'SEBAGIAN' : 'GAGAL',
+      'Laporan kegiatan: Terkirim=' + successCount + ', Gagal=' + failureCount
+    );
+
+    return jsonResponse_({
+      ok: true,
+      waktu_server: now.toISOString(),
+      jumlah_laporan: reports.length,
+      jumlah_terkirim: successCount,
+      jumlah_gagal: failureCount,
+      hasil: results
+    });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function buildLaporanKegiatanRow_(report, headers) {
+  return headers.map(function(header) {
+    return Object.prototype.hasOwnProperty.call(report, header)
+      ? report[header]
+      : '';
+  });
+}
+
+function normalizeDateOnly_(value, fieldName) {
+  var text = requireString_(value, fieldName, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    throw new ApiError(
+      'TANGGAL_TIDAK_VALID',
+      fieldName + ' harus berformat yyyy-MM-dd.'
+    );
+  }
+  var parts = text.split('-').map(function(part) { return Number(part); });
+  var date = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+  if (
+    date.getUTCFullYear() !== parts[0] ||
+    date.getUTCMonth() !== parts[1] - 1 ||
+    date.getUTCDate() !== parts[2]
+  ) {
+    throw new ApiError(
+      'TANGGAL_TIDAK_VALID',
+      fieldName + ' bukan tanggal kalender yang valid.'
+    );
+  }
+  return text;
 }
 
 /**
@@ -1172,6 +1502,14 @@ function setupBackend() {
         headers: SHEET_HEADERS.PENDATAAN
       },
       {
+        name: CONFIG.SHEETS.LAPORAN_KEGIATAN,
+        headers: SHEET_HEADERS.LAPORAN_KEGIATAN
+      },
+      {
+        name: CONFIG.SHEETS.ADMIN,
+        headers: SHEET_HEADERS.ADMIN
+      },
+      {
         name: CONFIG.SHEETS.REKAP_CAKUPAN,
         headers: SHEET_HEADERS.REKAP_CAKUPAN
       },
@@ -1188,6 +1526,8 @@ function setupBackend() {
         definition.headers
       );
     });
+
+    ensureDefaultAdminUnlocked_(spreadsheet);
 
     return {
       ok: true,
@@ -1255,6 +1595,14 @@ function migrateBackendSchema() {
       {
         name: CONFIG.SHEETS.PENDATAAN,
         headers: SHEET_HEADERS.PENDATAAN
+      },
+      {
+        name: CONFIG.SHEETS.LAPORAN_KEGIATAN,
+        headers: SHEET_HEADERS.LAPORAN_KEGIATAN
+      },
+      {
+        name: CONFIG.SHEETS.ADMIN,
+        headers: SHEET_HEADERS.ADMIN
       }
     ].forEach(function(definition) {
       ensureSheetWithHeaders_(
@@ -1263,6 +1611,8 @@ function migrateBackendSchema() {
         definition.headers
       );
     });
+
+    ensureDefaultAdminUnlocked_(spreadsheet);
 
     return {
       ok: true,
@@ -1292,6 +1642,38 @@ function removeColumnsByHeader_(sheet, headersToRemove) {
   columns.forEach(function(column) {
     sheet.deleteColumn(column);
   });
+}
+
+/** Seed admin pertama hanya ketika sheet admin belum memiliki akun. */
+function ensureDefaultAdminUnlocked_(spreadsheet) {
+  var sheet = spreadsheet.getSheetByName(CONFIG.SHEETS.ADMIN);
+  if (!sheet) {
+    return false;
+  }
+
+  var rows = readSheetObjectsFromSheet_(sheet);
+  if (rows.some(function(row) { return toText_(row.username) !== ''; })) {
+    return false;
+  }
+
+  var now = new Date();
+  var values = {
+    username: 'manungki.fajri',
+    nama: 'Administrator Utama',
+    password_hash: sha256Hex_('1234'),
+    aktif: true,
+    created_at: now,
+    updated_at: now
+  };
+  var headers = getSheetHeaders_(sheet);
+  sheet
+    .getRange(sheet.getLastRow() + 1, 1, 1, headers.length)
+    .setValues([headers.map(function(header) {
+      return Object.prototype.hasOwnProperty.call(values, header)
+        ? values[header]
+        : '';
+    })]);
+  return true;
 }
 
 /**
@@ -1441,6 +1823,15 @@ function ensureSheetWithHeaders_(spreadsheet, sheetName, headers) {
     'kode_kec',
     'kode_desa',
     'kode_sls'
+  ];
+  textColumnsBySheet[CONFIG.SHEETS.LAPORAN_KEGIATAN] = [
+    'id_laporan',
+    'id_petugas',
+    'kode_kab',
+    'tanggal'
+  ];
+  textColumnsBySheet[CONFIG.SHEETS.ADMIN] = [
+    'username'
   ];
 
   var textHeaders = textColumnsBySheet[sheetName] || [];
@@ -1712,10 +2103,12 @@ function getExistingRecordIndex_(sheet, headers) {
     .getRange(2, columnIndex + 1, lastRow - 1, 1)
     .getValues();
 
-  values.forEach(function(row) {
+  values.forEach(function(row, index) {
     var idRecord = toText_(row[0]).toLowerCase();
     if (idRecord) {
-      result[idRecord] = true;
+      result[idRecord] = {
+        rowNumber: index + 2
+      };
     }
   });
 
@@ -2213,10 +2606,20 @@ function handleDashboardPage_(params) {
   var dashboardToken = toText_(
     params.admin_token || params.dashboard_token
   );
-  assertDashboardAccess_(dashboardToken);
+  var legacyAccess = false;
+  try {
+    assertDashboardAccess_(dashboardToken, '');
+    legacyAccess = true;
+  } catch (error) {
+    /*
+     * Halaman tetap boleh dibuka untuk menampilkan form login. Semua fungsi
+     * data di bawah tetap menolak request tanpa session/token yang valid.
+     */
+    legacyAccess = false;
+  }
 
   var template = HtmlService.createTemplateFromFile('Dashboard');
-  template.dashboardTokenJson = JSON.stringify(dashboardToken)
+  template.dashboardTokenJson = JSON.stringify(legacyAccess ? dashboardToken : '')
     .replace(/</g, '\\u003c');
 
   return template
@@ -2225,7 +2628,7 @@ function handleDashboardPage_(params) {
 }
 
 function getDashboardBootstrap(request) {
-  assertDashboardAccess_(getDashboardToken_(request));
+  assertDashboardRequestAccess_(request);
 
   var masterRows = getMasterRecords_();
   var workers = getDashboardWorkers_();
@@ -2269,7 +2672,7 @@ function getDashboardBootstrap(request) {
 }
 
 function getDashboardData(request) {
-  assertDashboardAccess_(getDashboardToken_(request));
+  assertDashboardRequestAccess_(request);
   var filters = normalizeDashboardFilters_(
     request && request.filters ? request.filters : request
   );
@@ -2289,10 +2692,29 @@ function getDashboardToken_(request) {
   );
 }
 
-function assertDashboardAccess_(suppliedToken) {
+function getDashboardSession_(request) {
+  if (!request) {
+    return '';
+  }
+  return toText_(request.dashboard_session || request.session);
+}
+
+function assertDashboardRequestAccess_(request) {
+  return assertDashboardAccess_(
+    getDashboardToken_(request),
+    getDashboardSession_(request)
+  );
+}
+
+function assertDashboardAccess_(suppliedToken, suppliedSession) {
   var settings = getSettings_();
   var expectedToken = settings.dashboardToken;
   var token = toText_(suppliedToken);
+
+  var sessionUser = getDashboardSessionUser_(suppliedSession);
+  if (sessionUser) {
+    return sessionUser;
+  }
 
   if (
     expectedToken &&
@@ -2338,6 +2760,162 @@ function assertDashboardAccess_(suppliedToken) {
     'AKSES_DASHBOARD_DITOLAK',
     'Anda tidak memiliki akses ke dashboard admin.'
   );
+}
+
+function dashboardSessionCacheKey_(session) {
+  return 'DASH_SESSION_' + sha256Hex_(toText_(session));
+}
+
+function getDashboardSessionUser_(session) {
+  var value = toText_(session);
+  if (!value) {
+    return '';
+  }
+  try {
+    return toText_(
+      CacheService.getScriptCache().get(dashboardSessionCacheKey_(value))
+    );
+  } catch (error) {
+    return '';
+  }
+}
+
+function createDashboardSession_(username) {
+  var session = Utilities.getUuid();
+  CacheService.getScriptCache().put(
+    dashboardSessionCacheKey_(session),
+    toText_(username),
+    6 * 60 * 60
+  );
+  return session;
+}
+
+function clearDashboardSession_(session) {
+  var value = toText_(session);
+  if (!value) return;
+  CacheService.getScriptCache().remove(dashboardSessionCacheKey_(value));
+}
+
+/** Login admin berbasis username/password dengan session CacheService. */
+function loginDashboard(request) {
+  request = request || {};
+  var username = requireString_(request.username, 'username', 100)
+    .toLowerCase();
+  var password = requireString_(request.password, 'password', 200);
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(CONFIG.LOCK_TIMEOUT_MS)) {
+    throw new ApiError(
+      'SERVER_SIBUK',
+      'Server sedang memproses request lain. Silakan coba lagi.'
+    );
+  }
+
+  try {
+    var spreadsheet = getSpreadsheet_();
+    ensureSheetWithHeaders_(
+      spreadsheet,
+      CONFIG.SHEETS.ADMIN,
+      SHEET_HEADERS.ADMIN
+    );
+    ensureDefaultAdminUnlocked_(spreadsheet);
+    var rows = readSheetObjects_(CONFIG.SHEETS.ADMIN);
+    var found = null;
+    rows.some(function(row) {
+      if (toText_(row.username).toLowerCase() === username) {
+        found = row;
+        return true;
+      }
+      return false;
+    });
+
+    if (
+      !found ||
+      !normalizeBoolean_(found.aktif, 'aktif', false) ||
+      !constantTimeEquals_(sha256Hex_(password), normalizePinHash_(found.password_hash))
+    ) {
+      throw new ApiError(
+        'KREDENSIAL_DASHBOARD_TIDAK_VALID',
+        'Username atau password admin tidak valid.'
+      );
+    }
+
+    return {
+      ok: true,
+      session: createDashboardSession_(username),
+      username: username,
+      nama: toText_(found.nama) || username
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Pendaftaran admin baru hanya dapat dilakukan oleh admin yang sudah login. */
+function registerDashboardAdmin(request) {
+  assertDashboardRequestAccess_(request);
+  request = request || {};
+  var username = requireString_(request.username, 'username', 100)
+    .toLowerCase();
+  if (!/^[a-z0-9._-]+$/.test(username)) {
+    throw new ApiError(
+      'USERNAME_TIDAK_VALID',
+      'Username hanya boleh berisi huruf, angka, titik, garis bawah, atau strip.'
+    );
+  }
+  var password = requireString_(request.password, 'password', 200);
+  if (password.length < 4) {
+    throw new ApiError(
+      'PASSWORD_TERLALU_PENDEK',
+      'Password admin minimal 4 karakter.'
+    );
+  }
+  var nama = requireString_(request.nama, 'nama', 150);
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(CONFIG.LOCK_TIMEOUT_MS)) {
+    throw new ApiError(
+      'SERVER_SIBUK',
+      'Server sedang memproses request lain. Silakan coba lagi.'
+    );
+  }
+  try {
+    var spreadsheet = getSpreadsheet_();
+    var sheet = getSheetOrThrow_(CONFIG.SHEETS.ADMIN);
+    var headers = getSheetHeaders_(sheet);
+    assertRequiredHeaders_(headers, SHEET_HEADERS.ADMIN, CONFIG.SHEETS.ADMIN);
+    var duplicate = readSheetObjectsFromSheet_(sheet).some(function(row) {
+      return toText_(row.username).toLowerCase() === username;
+    });
+    if (duplicate) {
+      throw new ApiError(
+        'USERNAME_SUDAH_ADA',
+        'Username admin tersebut sudah terdaftar.'
+      );
+    }
+    var now = new Date();
+    var values = {
+      username: username,
+      nama: nama,
+      password_hash: sha256Hex_(password),
+      aktif: true,
+      created_at: now,
+      updated_at: now
+    };
+    sheet
+      .getRange(sheet.getLastRow() + 1, 1, 1, headers.length)
+      .setValues([headers.map(function(header) {
+        return Object.prototype.hasOwnProperty.call(values, header)
+          ? values[header]
+          : '';
+      })]);
+    return {ok: true, username: username, nama: nama};
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function logoutDashboard(request) {
+  clearDashboardSession_(getDashboardSession_(request));
+  return {ok: true};
 }
 
 function getDashboardWorkers_() {
@@ -2981,7 +3559,7 @@ function objectValues_(object) {
  * PIN tidak pernah dikembalikan ke browser dan tidak pernah disimpan mentah.
  */
 function saveDashboardPetugas(request) {
-  assertDashboardAccess_(getDashboardToken_(request));
+  assertDashboardRequestAccess_(request);
   request = request || {};
 
   var idPetugas = requireString_(
@@ -3145,7 +3723,7 @@ function writeDashboardFields_(sheet, rowNumber, headers, fields) {
  * - baris lama yang tidak ada di file import tidak dihapus.
  */
 function importDashboardMaster(request) {
-  assertDashboardAccess_(getDashboardToken_(request));
+  assertDashboardRequestAccess_(request);
   request = request || {};
   var records = request.records;
 
@@ -3347,7 +3925,7 @@ function normalizeDashboardMasterInput_(raw) {
  * sebagai fallback agar instalasi lama tetap dapat mencoba fitur ini.
  */
 function generatePetugasReport(request) {
-  assertDashboardAccess_(getDashboardToken_(request));
+  assertDashboardRequestAccess_(request);
   var options = normalizeReportOptions_(request);
   var dataset = buildPetugasReportDataset_(options);
 
@@ -3447,6 +4025,256 @@ function generatePetugasReport(request) {
     }
     throw error;
   }
+}
+
+/**
+ * Membuat laporan kegiatan harian utuh untuk satu petugas.
+ *
+ * Setiap tanggal berisi rangkuman kegiatan dari sheet laporan_kegiatan,
+ * daftar record pendataan pada tanggal tersebut, lalu lampiran foto Drive
+ * dari record yang sama. Data lokal yang belum tersinkron tidak dapat dimuat
+ * oleh dashboard, sehingga tetap ditampilkan sebagai catatan pada laporan.
+ */
+function generateLaporanKegiatanReport(request) {
+  assertDashboardRequestAccess_(request);
+  var options = normalizeReportOptions_(request);
+  var dataset = buildPetugasReportDataset_(options);
+  var activityRows = getActivityReportRows_(options);
+  var grouped = {};
+
+  function getDay(day) {
+    if (!grouped[day]) {
+      grouped[day] = {
+        tanggal: day,
+        rangkuman: '',
+        status_kirim: '',
+        records: []
+      };
+    }
+    return grouped[day];
+  }
+
+  activityRows.forEach(function(row) {
+    var day = normalizeDateOnly_(row.tanggal, 'tanggal');
+    var group = getDay(day);
+    group.rangkuman = toText_(row.rangkuman);
+    group.status_kirim = toText_(row.status_kirim);
+  });
+
+  dataset.records.forEach(function(record) {
+    var day = formatReportDateOnly_(
+      dashboardRecordDate_(record.waktu_pendataan)
+    );
+    if (!day) day = 'TANGGAL_TIDAK_TERSEDIA';
+    getDay(day).records.push(record);
+  });
+
+  var days = objectValues_(grouped).sort(function(left, right) {
+    return String(right.tanggal).localeCompare(String(left.tanggal));
+  });
+  var reportFolder = getReportFolder_();
+  var generatedAt = new Date();
+  var periodPart = options.date_from && options.date_to
+    ? options.date_from + '_' + options.date_to
+    : options.date_from
+      ? 'mulai_' + options.date_from
+      : options.date_to
+        ? 'sampai_' + options.date_to
+        : 'seluruh_periode';
+  var baseName = sanitizeFileName_(
+    'Laporan_Kegiatan_' + dataset.worker.id_petugas + '_' + periodPart + '_' +
+    Utilities.formatDate(generatedAt, getSettings_().timeZone, 'yyyyMMdd_HHmmss')
+  );
+  var temporaryDocument = null;
+  var temporaryFile = null;
+
+  if (dataset.records.length > CONFIG.MAX_REPORT_RECORDS) {
+    throw new ApiError(
+      'LAPORAN_TERLALU_BESAR',
+      'Laporan berisi terlalu banyak record. Batasi periode laporan.'
+    );
+  }
+  if (options.includePhotos && dataset.photoCount > CONFIG.MAX_REPORT_PHOTOS) {
+    throw new ApiError(
+      'FOTO_LAPORAN_TERLALU_BANYAK',
+      'Jumlah foto melebihi batas ' + CONFIG.MAX_REPORT_PHOTOS + '.'
+    );
+  }
+
+  try {
+    temporaryDocument = DocumentApp.create(baseName);
+    temporaryFile = DriveApp.getFileById(temporaryDocument.getId());
+    buildLaporanKegiatanDocument_(
+      temporaryDocument,
+      dataset,
+      days,
+      options,
+      generatedAt
+    );
+    temporaryDocument.saveAndClose();
+
+    var pdfBlob = temporaryFile.getAs(MimeType.PDF).setName(baseName + '.pdf');
+    var pdfFile = reportFolder.createFile(pdfBlob);
+    pdfFile.setDescription(
+      'Laporan kegiatan harian | id_petugas=' + dataset.worker.id_petugas
+    );
+    temporaryFile.setTrashed(true);
+
+    return {
+      ok: true,
+      nama_file: pdfFile.getName(),
+      file_id: pdfFile.getId(),
+      url: pdfFile.getUrl(),
+      download_url: 'https://drive.google.com/uc?export=download&id=' +
+        encodeURIComponent(pdfFile.getId()),
+      id_petugas: dataset.worker.id_petugas,
+      jumlah_hari: days.length,
+      jumlah_record: dataset.records.length,
+      jumlah_foto: dataset.photoCount,
+      dibuat_pada: generatedAt.toISOString()
+    };
+  } catch (error) {
+    if (temporaryFile) {
+      try {
+        temporaryFile.setTrashed(true);
+      } catch (trashError) {
+        Logger.log('Gagal membersihkan dokumen laporan kegiatan sementara.');
+      }
+    }
+    throw error;
+  }
+}
+
+function getActivityReportRows_(options) {
+  var rows = readSheetObjects_(CONFIG.SHEETS.LAPORAN_KEGIATAN);
+  return rows.filter(function(row) {
+    if (
+      toText_(row.id_petugas).toLowerCase() !==
+      options.id_petugas.toLowerCase()
+    ) {
+      return false;
+    }
+    var day = toText_(row.tanggal);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
+    if (options.date_from && day < options.date_from) return false;
+    if (options.date_to && day > options.date_to) return false;
+    return true;
+  });
+}
+
+function buildLaporanKegiatanDocument_(
+  document,
+  dataset,
+  days,
+  options,
+  generatedAt
+) {
+  var body = document.getBody();
+  body.clear();
+  body.setPageWidth(841.89);
+  body.setPageHeight(595.28);
+  body.setMarginTop(32);
+  body.setMarginBottom(32);
+  body.setMarginLeft(36);
+  body.setMarginRight(36);
+
+  var title = body.appendParagraph('LAPORAN KEGIATAN PENDATAAN HARIAN');
+  title.setHeading(DocumentApp.ParagraphHeading.TITLE)
+    .setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+  styleReportParagraph_(title, {bold: true, color: '#0B3558'});
+  var subtitle = body.appendParagraph('SENSUS EKONOMI 2026');
+  subtitle.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+  styleReportParagraph_(subtitle, {bold: true, color: '#0D9488'});
+  var printedAt = body.appendParagraph(
+    'Dicetak pada ' + formatReportDateTime_(generatedAt) +
+    ' | Periode: ' + reportPeriodLabel_(options)
+  );
+  printedAt.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+  styleReportParagraph_(printedAt, {size: 8, color: '#64748B'});
+  body.appendHorizontalRule();
+
+  var identity = body.appendTable([
+    ['IDENTITAS PETUGAS', 'NILAI'],
+    ['Kode petugas', dataset.worker.id_petugas],
+    ['Nama petugas', dataset.worker.nama || '-'],
+    ['Kode kabupaten', dataset.worker.kode_kabupaten || '-'],
+    ['Kabupaten', dataset.worker.kabupaten || '-']
+  ]);
+  styleReportTable_(identity);
+
+  var heading = body.appendParagraph('RANGKUMAN PER TANGGAL');
+  heading.setHeading(DocumentApp.ParagraphHeading.HEADING1);
+  styleReportParagraph_(heading, {color: '#0B3558'});
+
+  if (days.length === 0) {
+    body.appendParagraph('Belum ada laporan kegiatan atau pendataan pada periode ini.');
+    return;
+  }
+
+  days.forEach(function(day, dayIndex) {
+    if (dayIndex > 0) body.appendPageBreak();
+    var dayHeading = body.appendParagraph('Tanggal ' + day.tanggal);
+    dayHeading.setHeading(DocumentApp.ParagraphHeading.HEADING2);
+    styleReportParagraph_(dayHeading, {bold: true, color: '#0B3558'});
+
+    var summary = body.appendParagraph(
+      'Rangkuman kegiatan: ' + (day.rangkuman || 'Belum diisi')
+    );
+    styleReportParagraph_(summary, {size: 10, color: '#334155'});
+    var status = body.appendParagraph(
+      'Status laporan harian: ' + (day.status_kirim || 'BELUM DIBUAT')
+    );
+    styleReportParagraph_(status, {size: 8, color: '#64748B'});
+
+    var detailRows = [[
+      'No', 'Waktu', 'Kecamatan / Desa', 'SLS', 'Objek', 'Status', 'Koordinat'
+    ]];
+    day.records.forEach(function(record, index) {
+      detailRows.push([
+        String(index + 1),
+        formatReportDateTime_(record.waktu_pendataan),
+        (record.nama_kec || record.kode_kec || '-') + ' / ' +
+          (record.nama_desa || record.kode_desa || '-'),
+        (record.kode_sls || '-') + ' - ' + (record.nama_sls || '-'),
+        (record.jenis_objek || '-') + ' · ' + (record.nama_objek || '-'),
+        record.status_pendataan || '-',
+        formatReportCoordinate_(record.latitude, record.longitude)
+      ]);
+    });
+    if (day.records.length === 0) {
+      detailRows.push(['-', '-', '-', '-', 'Tidak ada hasil pendataan', '-', '-']);
+    }
+    styleReportTable_(body.appendTable(detailRows));
+
+    if (options.includePhotos) {
+      var photoHeading = body.appendParagraph('Foto pendataan');
+      styleReportParagraph_(photoHeading, {bold: true, size: 9, color: '#0B3558'});
+      var appended = 0;
+      day.records.forEach(function(record) {
+        (record.photo_items || []).forEach(function(photo) {
+          if (!photo.file_id) return;
+          try {
+            verifyDriveFileInConfiguredFolder_(photo.file_id);
+            var imageParagraph = body.appendParagraph(
+              (record.nama_sls || record.kode_sls || '-') + ' · ' +
+              (record.nama_objek || '-') + ' · Foto ' + photo.urutan
+            );
+            styleReportParagraph_(imageParagraph, {size: 8, color: '#64748B'});
+            var image = imageParagraph.appendInlineImage(
+              DriveApp.getFileById(photo.file_id).getBlob()
+            );
+            resizeReportImage_(image);
+            appended += 1;
+          } catch (error) {
+            body.appendParagraph('[Foto tidak dapat diambil dari Drive]');
+          }
+        });
+      });
+      if (appended === 0) {
+        body.appendParagraph('Tidak ada foto yang dapat ditampilkan.');
+      }
+    }
+  });
 }
 
 function normalizeReportOptions_(request) {
@@ -4093,6 +4921,16 @@ function formatReportDateTime_(value) {
     date,
     getSettings_().timeZone,
     'dd/MM/yyyy HH:mm'
+  );
+}
+
+function formatReportDateOnly_(value) {
+  var date = value instanceof Date ? value : dashboardRecordDate_(value);
+  if (!date || isNaN(date.getTime())) return '';
+  return Utilities.formatDate(
+    date,
+    getSettings_().timeZone,
+    'yyyy-MM-dd'
   );
 }
 

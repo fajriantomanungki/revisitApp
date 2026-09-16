@@ -13,8 +13,8 @@ import kotlinx.coroutines.withContext
 
 /**
  * Membersihkan file foto lokal yang sudah terkonfirmasi TERKIRIM.
- * Metadata pendataan tetap dipertahankan di Room; hanya row foto dan file
- * fisiknya yang dihapus setelah masa retensi berlalu.
+ * Metadata pendataan dan referensi drive_file_id tetap dipertahankan di Room;
+ * hanya salinan foto fisiknya yang dihapus setelah masa retensi berlalu.
  */
 @HiltWorker
 class PhotoRetentionWorker @AssistedInject constructor(
@@ -32,13 +32,12 @@ class PhotoRetentionWorker @AssistedInject constructor(
         val candidates = fotoDao.getUploadedPhotosBefore(cutoffMillis)
         if (candidates.isEmpty()) return@withContext Result.success()
 
-        /* Jika delete gagal, row dipertahankan agar percobaan berikutnya aman. */
-        val removable = candidates.filter { photo ->
+        /* Jika delete gagal, referensi dan file tetap dipertahankan. */
+        candidates.forEach { photo ->
             val file = File(photo.pathLokal)
-            !file.exists() || file.delete()
-        }
-        if (removable.isNotEmpty()) {
-            fotoDao.deleteAll(removable)
+            if (!file.exists() || file.delete()) {
+                fotoDao.clearLocalPath(photo.idFoto)
+            }
         }
         Result.success()
     }

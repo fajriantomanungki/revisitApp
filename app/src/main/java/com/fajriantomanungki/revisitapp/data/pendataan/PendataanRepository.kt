@@ -28,7 +28,9 @@ data class PendataanFormSubmission(
     val waktuPendataan: Long?,
     val photoFiles: List<File>,
     val simpanSebagaiDraf: Boolean,
-    val versiApp: String
+    val versiApp: String,
+    /** Null untuk pendataan baru; berisi UUID saat pengguna mengedit. */
+    val existingRecordId: String? = null
 )
 
 /**
@@ -40,6 +42,12 @@ data class PendataanFormSubmission(
 class PendataanRepository @Inject constructor(
     private val database: AppDatabase
 ) {
+
+    suspend fun save(submission: PendataanFormSubmission): String {
+        return submission.existingRecordId
+            ?.let { updateExisting(it, submission) }
+            ?: saveNew(submission)
+    }
 
     suspend fun saveNew(submission: PendataanFormSubmission): String {
         require(submission.idPetugas.isNotBlank()) {
@@ -91,6 +99,117 @@ class PendataanRepository @Inject constructor(
             database.pendataanDao().upsert(record)
             if (photos.isNotEmpty()) {
                 database.fotoDao().upsertAll(photos)
+            }
+        }
+        return idRecord
+    }
+
+    /**
+     * Memperbarui record yang sudah ada tanpa membuat UUID baru.
+     *
+     * Memakai UUID yang sama membuat edit record TERKIRIM menjadi upsert
+     * idempoten di Apps Script, sehingga tidak menambah hitungan ganda pada
+     * dashboard. Foto lama dipertahankan bila pengguna tidak mengambil foto
+     * baru; bila ada foto baru, seluruh set foto diganti secara atomik.
+     */
+    suspend fun updateExisting(
+        idRecord: String,
+        submission: PendataanFormSubmission
+    ): String {
+        require(submission.idPetugas.isNotBlank()) {
+            "id_petugas wajib tersedia sebelum memperbarui pendataan"
+        }
+
+        val existing = database.pendataanDao().getById(
+            idRecord = idRecord,
+            idPetugas = submission.idPetugas
+        ) ?: error("Pendataan yang akan diedit tidak ditemukan di perangkat")
+        val editingSentRecord = existing.statusKirim == SyncStatus.TERKIRIM
+        if (editingSentRecord && submission.simpanSebagaiDraf) {
+            error("Record yang sudah terkirim harus disimpan melalui tombol kirim ulang.")
+        }
+        val oldPhotos = database.fotoDao().getByRecord(idRecord)
+        val effectivePhotoFiles = if (submission.photoFiles.isNotEmpty()) {
+            submission.photoFiles
+        } else {
+            oldPhotos.map { File(it.pathLokal) }
+        }
+
+        if (!submission.simpanSebagaiDraf &&
+            !isReadyToSend(submission.copy(photoFiles = effectivePhotoFiles))
+        ) {
+            error("Pendataan belum lengkap untuk dikirim. Lengkapi lokasi, data objek, dan foto.")
+        }
+
+        val now = System.currentTimeMillis()
+        val nextStatus = if (submission.simpanSebagaiDraf) {
+            SyncStatus.DRAFT
+        } else {
+            SyncStatus.SIAP_KIRIM
+        }
+        val record = existing.copy(
+            kodeKab = submission.wilayah?.kodeKab.orEmpty(),
+            kabupaten = submission.wilayah?.kabupaten.orEmpty(),
+            kodeKec = submission.wilayah?.kodeKec.orEmpty(),
+            namaKec = submission.wilayah?.namaKec.orEmpty(),
+            kodeDesa = submission.wilayah?.kodeDesa.orEmpty(),
+            namaDesa = submission.wilayah?.namaDesa.orEmpty(),
+            kodeSls = submission.wilayah?.kodeSls.orEmpty(),
+            namaSls = submission.wilayah?.namaSls.orEmpty(),
+            jenisObjek = submission.jenisObjek,
+            namaObjek = submission.namaObjek,
+            alamat = submission.alamat,
+            statusPendataan = submission.statusPendataan,
+            catatan = submission.catatan,
+            latitude = submission.latitude,
+            longitude = submission.longitude,
+            akurasiM = submission.accuracyM,
+            isMock = submission.isMock,
+            waktuPendataan = submission.waktuPendataan,
+            statusKirim = nextStatus,
+            replaceExisting = existing.replaceExisting ||
+                editingSentRecord,
+            pesanError = null,
+            percobaanKirim = if (nextStatus == SyncStatus.DRAFT) {
+                existing.percobaanKirim
+            } else {
+                0
+            },
+            waktuTerkirim = if (nextStatus == SyncStatus.DRAFT) {
+                existing.waktuTerkirim
+            } else {
+                null
+            },
+            waktuDiubah = now,
+            versiApp = submission.versiApp
+        )
+
+        val replacePhotos = submission.photoFiles.isNotEmpty()
+        val newPhotos = if (replacePhotos) {
+            submission.photoFiles.mapIndexed { index, file ->
+                FotoEntity(
+                    idRecord = idRecord,
+                    pathLokal = file.absolutePath,
+                    urutan = index + 1
+                )
+            }
+        } else {
+            emptyList()
+        }
+
+        database.withTransaction {
+            database.pendataanDao().upsert(record)
+            if (replacePhotos) {
+                database.fotoDao().deleteByRecord(idRecord)
+                database.fotoDao().upsertAll(newPhotos)
+            }
+        }
+
+        if (replacePhotos) {
+            oldPhotos.forEach { old ->
+                if (newPhotos.none { it.pathLokal == old.pathLokal }) {
+                    File(old.pathLokal).delete()
+                }
             }
         }
         return idRecord

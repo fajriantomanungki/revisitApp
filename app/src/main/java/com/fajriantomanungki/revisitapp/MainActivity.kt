@@ -15,9 +15,11 @@ import com.fajriantomanungki.revisitapp.data.dashboard.DashboardCoverageReposito
 import com.fajriantomanungki.revisitapp.data.local.dao.PendataanDao
 import com.fajriantomanungki.revisitapp.data.local.dao.WilayahDao
 import com.fajriantomanungki.revisitapp.data.local.dao.CakupanCacheDao
+import com.fajriantomanungki.revisitapp.data.local.dao.LaporanKegiatanDao
 import com.fajriantomanungki.revisitapp.data.master.MasterWilayahRepository
 import com.fajriantomanungki.revisitapp.data.dashboard.CakupanSyncRepository
 import com.fajriantomanungki.revisitapp.data.pendataan.PendataanRepository
+import com.fajriantomanungki.revisitapp.data.laporan.LaporanKegiatanRepository
 import com.fajriantomanungki.revisitapp.data.sync.AppsScriptApi
 import com.fajriantomanungki.revisitapp.data.sync.NetworkStatus
 import com.fajriantomanungki.revisitapp.data.sync.SyncConfigStore
@@ -44,6 +46,9 @@ class MainActivity : ComponentActivity() {
     lateinit var pendataanDao: PendataanDao
 
     @Inject
+    lateinit var laporanKegiatanDao: LaporanKegiatanDao
+
+    @Inject
     lateinit var cakupanCacheDao: CakupanCacheDao
 
     @Inject
@@ -63,6 +68,9 @@ class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var pendataanRepository: PendataanRepository
+
+    @Inject
+    lateinit var laporanKegiatanRepository: LaporanKegiatanRepository
 
     @Inject
     lateinit var locationHelper: LocationHelper
@@ -143,6 +151,8 @@ class MainActivity : ComponentActivity() {
                     }
                     val pendataan by pendataanDao.observeAll(idPetugas)
                         .collectAsState(initial = emptyList())
+                    val laporanKegiatan by laporanKegiatanDao.observeAll(idPetugas)
+                        .collectAsState(initial = emptyList())
                     val dashboardSnapshot by dashboardCoverageRepository
                         .observe(idPetugas)
                         .collectAsState(
@@ -159,6 +169,7 @@ class MainActivity : ComponentActivity() {
                         kabupaten = identity.kabupaten,
                         wilayah = wilayahPetugas,
                         pendataan = pendataan,
+                        laporanKegiatan = laporanKegiatan,
                         dashboardSnapshot = dashboardSnapshot,
                         locationHelper = locationHelper,
                         watermarkEngine = watermarkEngine,
@@ -211,7 +222,18 @@ class MainActivity : ComponentActivity() {
                         },
                         onSavePendataan = { submission ->
                             runCatching {
-                                pendataanRepository.saveNew(submission)
+                                pendataanRepository.save(submission)
+                                Unit
+                            }
+                        },
+                        onSaveLaporanKegiatan = { tanggal, rangkuman, siapKirim ->
+                            runCatching {
+                                laporanKegiatanRepository.save(
+                                    idPetugas = idPetugas,
+                                    tanggal = tanggal,
+                                    rangkuman = rangkuman,
+                                    siapKirim = siapKirim
+                                )
                                 Unit
                             }
                         },

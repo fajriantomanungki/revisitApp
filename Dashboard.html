@@ -53,6 +53,73 @@
       min-height: 100vh;
     }
 
+    .is-hidden {
+      display: none !important;
+    }
+
+    .login-gate {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background:
+        radial-gradient(circle at 12% 8%, rgba(245, 158, 11, .18), transparent 24rem),
+        radial-gradient(circle at 90% 90%, rgba(13, 148, 136, .2), transparent 28rem),
+        var(--canvas);
+    }
+
+    .login-card {
+      width: min(100%, 430px);
+      padding: 30px;
+      border: 1px solid rgba(226, 232, 240, .95);
+      border-radius: 24px;
+      background: rgba(255, 255, 255, .94);
+      box-shadow: 0 24px 60px rgba(11, 53, 88, .16);
+    }
+
+    .login-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .login-card h1 {
+      font-size: 24px;
+    }
+
+    .login-card .field {
+      margin-top: 14px;
+    }
+
+    .login-card .button {
+      width: 100%;
+      margin-top: 18px;
+    }
+
+    .login-hint {
+      margin: 18px 0 0;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .login-error {
+      display: none;
+      margin-top: 14px;
+      padding: 11px 12px;
+      border: 1px solid #fecaca;
+      border-radius: 10px;
+      color: #7f1d1d;
+      background: #fef2f2;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .login-error.visible {
+      display: block;
+    }
+
     .topbar {
       min-height: 72px;
       display: flex;
@@ -725,7 +792,40 @@
   </style>
 </head>
 <body>
-  <div class="app-shell">
+  <section class="login-gate" id="login-gate">
+    <div class="login-card">
+      <div class="login-brand">
+        <div class="brand-mark">SE</div>
+        <div>
+          <p class="brand-title" style="color:var(--navy)">Pendataan Lapangan</p>
+          <p class="brand-subtitle" style="color:var(--muted)">Dashboard Admin · Sensus Ekonomi 2026</p>
+        </div>
+      </div>
+      <h1>Masuk ke dashboard</h1>
+      <p class="page-description">
+        Gunakan akun admin untuk memantau progres, mengelola petugas, dan membuat laporan kegiatan.
+      </p>
+      <form id="dashboard-login-form">
+        <div class="field">
+          <label for="dashboard-username">Username</label>
+          <input id="dashboard-username" autocomplete="username" required maxlength="100" placeholder="Username admin">
+        </div>
+        <div class="field">
+          <label for="dashboard-password">Password</label>
+          <input id="dashboard-password" type="password" autocomplete="current-password" required maxlength="200" placeholder="Password admin">
+        </div>
+        <button class="button" id="dashboard-login-button" type="submit">Masuk</button>
+        <div class="login-error" id="dashboard-login-error"></div>
+      </form>
+      <p class="login-hint">
+        Akun admin awal dibuat otomatis oleh <code>setupBackend()</code>:
+        <strong>manungki.fajri</strong> dengan password awal <strong>1234</strong>.
+        Segera ganti/kelola akun setelah login.
+      </p>
+    </div>
+  </section>
+
+  <div class="app-shell is-hidden" id="dashboard-app">
     <header class="topbar">
       <div class="brand">
         <div class="brand-mark">SE</div>
@@ -737,6 +837,7 @@
       <div class="topbar-meta">
         <span><span class="status-dot"></span>Apps Script aktif</span>
         <span id="last-updated">Belum dimuat</span>
+        <button class="button secondary small" id="dashboard-logout" type="button">Keluar</button>
       </div>
     </header>
 
@@ -747,6 +848,7 @@
         <button class="nav-button" data-tab="reports">▣ <span>Laporan PDF</span></button>
         <button class="nav-button" data-tab="petugas">♙ <span>Petugas</span></button>
         <button class="nav-button" data-tab="master">⌘ <span>Master Wilayah</span></button>
+        <button class="nav-button" data-tab="admin">⚿ <span>Admin</span></button>
       </aside>
 
       <main class="main">
@@ -951,6 +1053,42 @@
             </p>
             <div class="report-result" id="report-result"></div>
           </article>
+
+          <article class="report-card">
+            <div class="form-head">
+              <div>
+                <h2>Laporan Kegiatan Harian</h2>
+                <p>Gabungkan tanggal pendataan, hasil pendataan, rangkuman kegiatan, dan foto menjadi satu PDF.</p>
+              </div>
+            </div>
+            <div class="form-grid">
+              <div class="field">
+                <label for="activity-report-petugas">Petugas *</label>
+                <select id="activity-report-petugas">
+                  <option value="">Pilih petugas</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="activity-report-date-from">Tanggal mulai</label>
+                <input id="activity-report-date-from" type="date">
+              </div>
+              <div class="field">
+                <label for="activity-report-date-to">Tanggal akhir</label>
+                <input id="activity-report-date-to" type="date">
+              </div>
+              <label class="checkbox-field">
+                <input id="activity-report-include-photos" type="checkbox" checked>
+                Sertakan foto pendataan
+              </label>
+            </div>
+            <div class="form-actions">
+              <button class="button teal" id="generate-activity-report" type="button">Buat Laporan Kegiatan</button>
+            </div>
+            <p class="help" style="padding:0 18px">
+              Laporan mengambil data yang sudah masuk Spreadsheet. Rangkuman yang belum dikirim dari Android belum dapat dimuat di sini.
+            </p>
+            <div class="report-result" id="activity-report-result"></div>
+          </article>
         </section>
 
         <section class="panel" id="panel-petugas">
@@ -1017,6 +1155,37 @@
           </article>
         </section>
 
+        <section class="panel" id="panel-admin">
+          <article class="form-card">
+            <div class="form-head">
+              <div>
+                <h2>Daftarkan Admin</h2>
+                <p>Admin yang sedang login dapat menambahkan akun admin lain.</p>
+              </div>
+            </div>
+            <form id="admin-form">
+              <div class="form-grid">
+                <div class="field">
+                  <label for="admin-username">Username *</label>
+                  <input id="admin-username" required maxlength="100" autocomplete="off" placeholder="contoh: admin.kabupaten">
+                </div>
+                <div class="field">
+                  <label for="admin-name">Nama admin *</label>
+                  <input id="admin-name" required maxlength="150" placeholder="Nama lengkap">
+                </div>
+                <div class="field">
+                  <label for="admin-password">Password *</label>
+                  <input id="admin-password" type="password" required minlength="4" maxlength="200" autocomplete="new-password">
+                </div>
+              </div>
+              <div class="form-actions">
+                <button class="button teal" type="submit">Daftarkan Admin</button>
+                <button class="button secondary" id="reset-admin" type="button">Kosongkan Form</button>
+              </div>
+            </form>
+          </article>
+        </section>
+
         <section class="panel" id="panel-master">
           <article class="form-card">
             <div class="form-head">
@@ -1049,12 +1218,33 @@
     var INITIAL_TOKEN = <?!= dashboardTokenJson ?>;
     var state = {
       token: INITIAL_TOKEN || '',
+      session: '',
       bootstrap: null,
-      data: null
+      data: null,
+      authenticated: Boolean(INITIAL_TOKEN)
     };
 
     function byId(id) {
       return document.getElementById(id);
+    }
+
+    function authorizedPayload(payload) {
+      var result = Object.assign({}, payload || {});
+      if (state.token) result.dashboard_token = state.token;
+      if (state.session) result.dashboard_session = state.session;
+      return result;
+    }
+
+    function setDashboardVisible(visible) {
+      state.authenticated = Boolean(visible);
+      byId('login-gate').classList.toggle('is-hidden', state.authenticated);
+      byId('dashboard-app').classList.toggle('is-hidden', !state.authenticated);
+    }
+
+    function setLoginError(message) {
+      var box = byId('dashboard-login-error');
+      box.textContent = message || '';
+      box.classList.toggle('visible', Boolean(message));
     }
 
     function escapeHtml(value) {
@@ -1167,6 +1357,15 @@
       );
       setOptions(
         'report-petugas',
+        bootstrap.petugas || [],
+        'id_petugas',
+        function(item) {
+          return item.id_petugas + ' · ' + (item.nama || '-');
+        },
+        false
+      );
+      setOptions(
+        'activity-report-petugas',
         bootstrap.petugas || [],
         'id_petugas',
         function(item) {
@@ -1340,13 +1539,19 @@
     async function refreshDashboard() {
       setLoading(true);
       try {
-        var response = await callServer('getDashboardData', {
-          dashboard_token: state.token,
+        var response = await callServer('getDashboardData', authorizedPayload({
           filters: collectDashboardFilters()
-        });
+        }));
         renderDashboard(response);
       } catch (error) {
-        showToast(error.message, true);
+        if (/akses|session|token|admin/i.test(error.message || '')) {
+          state.token = '';
+          state.session = '';
+          setDashboardVisible(false);
+          setLoginError('Sesi dashboard berakhir. Silakan masuk kembali.');
+        } else {
+          showToast(error.message, true);
+        }
       } finally {
         setLoading(false);
       }
@@ -1468,10 +1673,9 @@
       button.disabled = true;
       try {
         var records = parseDelimited(byId('master-csv').value);
-        var response = await callServer('importDashboardMaster', {
-          dashboard_token: state.token,
+        var response = await callServer('importDashboardMaster', authorizedPayload({
           records: records
-        });
+        }));
         showToast(
           'Master berhasil diimport. Diperbarui: ' + response.updated +
           ', ditambahkan: ' + response.inserted +
@@ -1490,14 +1694,13 @@
       var button = event.submitter;
       if (button) button.disabled = true;
       try {
-        var response = await callServer('saveDashboardPetugas', {
-          dashboard_token: state.token,
+        var response = await callServer('saveDashboardPetugas', authorizedPayload({
           id_petugas: byId('petugas-id').value,
           nama: byId('petugas-nama').value,
           pin: byId('petugas-pin').value,
           kode_kabupaten: byId('petugas-kabupaten').value,
           aktif: byId('petugas-aktif').checked
-        });
+        }));
         showToast(
           response.mode === 'created'
             ? 'Petugas berhasil ditambahkan.'
@@ -1524,15 +1727,14 @@
       button.disabled = true;
       resultBox.classList.remove('visible');
       try {
-        var response = await callServer('generatePetugasReport', {
-          dashboard_token: state.token,
+        var response = await callServer('generatePetugasReport', authorizedPayload({
           id_petugas: idPetugas,
           kode_kab: byId('report-kab').value,
           kode_kec: byId('report-kec').value,
           date_from: byId('report-date-from').value,
           date_to: byId('report-date-to').value,
           include_photos: byId('report-include-photos').checked
-        });
+        }));
         resultBox.innerHTML =
           '<strong>PDF berhasil dibuat:</strong> ' +
           escapeHtml(response.nama_file) +
@@ -1549,12 +1751,75 @@
       }
     }
 
+    async function generateActivityReport() {
+      var idPetugas = byId('activity-report-petugas').value;
+      if (!idPetugas) {
+        showToast('Pilih petugas terlebih dahulu.', true);
+        return;
+      }
+
+      var button = byId('generate-activity-report');
+      var resultBox = byId('activity-report-result');
+      button.disabled = true;
+      resultBox.classList.remove('visible');
+      try {
+        var response = await callServer(
+          'generateLaporanKegiatanReport',
+          authorizedPayload({
+            id_petugas: idPetugas,
+            date_from: byId('activity-report-date-from').value,
+            date_to: byId('activity-report-date-to').value,
+            include_photos: byId('activity-report-include-photos').checked
+          })
+        );
+        resultBox.innerHTML =
+          '<strong>Laporan kegiatan berhasil dibuat:</strong> ' +
+          escapeHtml(response.nama_file) +
+          '<br>Hari: ' + number(response.jumlah_hari) +
+          ' · Record: ' + number(response.jumlah_record) +
+          ' · Foto: ' + number(response.jumlah_foto) +
+          '<br><a href="' + escapeHtml(response.download_url || response.url) +
+          '" target="_blank" rel="noopener">Buka / Download laporan kegiatan</a>';
+        resultBox.classList.add('visible');
+        showToast('Laporan kegiatan berhasil dibuat.');
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function saveAdmin(event) {
+      event.preventDefault();
+      var button = event.submitter;
+      if (button) button.disabled = true;
+      try {
+        var response = await callServer('registerDashboardAdmin', authorizedPayload({
+          username: byId('admin-username').value,
+          nama: byId('admin-name').value,
+          password: byId('admin-password').value
+        }));
+        showToast('Admin ' + response.username + ' berhasil didaftarkan.');
+        byId('admin-form').reset();
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        if (button) button.disabled = false;
+      }
+    }
+
+    function clearAdminForm() {
+      byId('admin-form').reset();
+    }
+
     async function loadBootstrap() {
+      if (!state.authenticated) return;
       setLoading(true);
       try {
-        state.bootstrap = await callServer('getDashboardBootstrap', {
-          dashboard_token: state.token
-        });
+        state.bootstrap = await callServer(
+          'getDashboardBootstrap',
+          authorizedPayload({})
+        );
         populateFilterOptions();
         renderWorkers();
         byId('master-info').textContent =
@@ -1562,7 +1827,14 @@
           number(state.bootstrap.versi_master);
         await refreshDashboard();
       } catch (error) {
-        showToast(error.message, true);
+        if (/akses|session|token|admin/i.test(error.message || '')) {
+          state.token = '';
+          state.session = '';
+          setDashboardVisible(false);
+          setLoginError('Sesi dashboard berakhir. Silakan masuk kembali.');
+        } else {
+          showToast(error.message, true);
+        }
       } finally {
         setLoading(false);
       }
@@ -1579,13 +1851,57 @@
         overview: ['Monitoring Progress', 'Pantau target dan realisasi pendataan yang sudah tersinkron menurut kabupaten, kecamatan, dan petugas.'],
         reports: ['Laporan PDF per Petugas', 'Buat laporan rapi berdasarkan petugas, wilayah, periode, serta foto watermark dari Google Drive.'],
         petugas: ['Manajemen Petugas', 'Tambah, perbarui, atau nonaktifkan akun petugas tanpa menghapus riwayat pendataan.'],
-        master: ['Manajemen Master Wilayah', 'Import master Kabupaten–Kecamatan–Desa–SLS dengan validasi dan kenaikan versi otomatis.']
+        master: ['Manajemen Master Wilayah', 'Import master Kabupaten–Kecamatan–Desa–SLS dengan validasi dan kenaikan versi otomatis.'],
+        admin: ['Manajemen Admin', 'Daftarkan akun admin tambahan untuk mengelola dashboard secara aman.']
       };
       byId('page-title').textContent = titles[tabName][0];
       byId('page-description').textContent = titles[tabName][1];
     }
 
+    async function submitDashboardLogin(event) {
+      event.preventDefault();
+      var button = byId('dashboard-login-button');
+      button.disabled = true;
+      setLoginError('');
+      try {
+        var response = await callServer('loginDashboard', {
+          username: byId('dashboard-username').value,
+          password: byId('dashboard-password').value
+        });
+        state.token = '';
+        state.session = response.session || '';
+        setDashboardVisible(Boolean(state.session));
+        byId('dashboard-password').value = '';
+        showToast('Selamat datang, ' + (response.nama || response.username) + '.');
+        await loadBootstrap();
+      } catch (error) {
+        setLoginError(error.message || 'Login dashboard gagal.');
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function logoutDashboard() {
+      try {
+        await callServer('logoutDashboard', authorizedPayload({}));
+      } catch (error) {
+        // Session di browser tetap dibersihkan walaupun cache server sudah
+        // kedaluwarsa atau request logout gagal.
+      }
+      state.token = '';
+      state.session = '';
+      state.bootstrap = null;
+      state.data = null;
+      setDashboardVisible(false);
+      byId('dashboard-password').value = '';
+      byId('dashboard-username').focus();
+      setLoginError('');
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
+      setDashboardVisible(Boolean(state.token || state.session));
+      byId('dashboard-login-form').addEventListener('submit', submitDashboardLogin);
+      byId('dashboard-logout').addEventListener('click', logoutDashboard);
       document.querySelectorAll('.nav-button').forEach(function(button) {
         button.addEventListener('click', function() {
           activateTab(button.getAttribute('data-tab'));
@@ -1609,7 +1925,10 @@
       byId('reset-petugas').addEventListener('click', clearPetugasForm);
       byId('import-master').addEventListener('click', importMaster);
       byId('generate-report').addEventListener('click', generateReport);
-      loadBootstrap();
+      byId('generate-activity-report').addEventListener('click', generateActivityReport);
+      byId('admin-form').addEventListener('submit', saveAdmin);
+      byId('reset-admin').addEventListener('click', clearAdminForm);
+      if (state.authenticated) loadBootstrap();
     });
   </script>
 </body>

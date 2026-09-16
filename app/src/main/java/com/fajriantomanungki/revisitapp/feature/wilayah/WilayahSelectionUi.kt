@@ -469,7 +469,12 @@ private fun WilayahDropdown(
                 expanded = false
                 onQueryChanged(selectedCode.orEmpty())
             },
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                // Jaga lebar menu sama dengan field dan beri ruang di bawah
+                // field. Material3 akan memprioritaskan posisi bawah selama
+                // ruang layar masih mencukupi.
+                .exposedDropdownSize(matchTextFieldWidth = true)
+                .heightIn(max = 320.dp)
         ) {
             if (options.isEmpty()) {
                 DropdownMenuItem(
