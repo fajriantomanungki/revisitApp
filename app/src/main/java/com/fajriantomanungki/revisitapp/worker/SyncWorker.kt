@@ -25,6 +25,7 @@ import com.fajriantomanungki.revisitapp.data.sync.SyncConfig
 import com.fajriantomanungki.revisitapp.data.sync.SyncConfigStore
 import com.fajriantomanungki.revisitapp.data.sync.SyncPayloadRecord
 import com.fajriantomanungki.revisitapp.data.sync.UploadedPhotoReference
+import com.fajriantomanungki.revisitapp.domain.safety.LocalSessionCoordinator
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import java.io.File
@@ -64,10 +65,15 @@ class SyncWorker @AssistedInject constructor(
     private val fotoDao: FotoDao,
     private val laporanKegiatanDao: LaporanKegiatanDao,
     private val appsScriptApi: AppsScriptApi,
-    private val syncConfigStore: SyncConfigStore
+    private val syncConfigStore: SyncConfigStore,
+    private val sessionCoordinator: LocalSessionCoordinator
 ) : CoroutineWorker(appContext, workerParams) {
 
-    override suspend fun doWork(): Result {
+    override suspend fun doWork(): Result = sessionCoordinator.withMutationLock {
+        doWorkLocked()
+    }
+
+    private suspend fun doWorkLocked(): Result {
         val config = syncConfigStore.read()
             ?: return failureResult("Konfigurasi Apps Script belum tersedia")
 

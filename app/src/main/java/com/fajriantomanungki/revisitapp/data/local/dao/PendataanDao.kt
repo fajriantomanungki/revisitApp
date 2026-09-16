@@ -156,6 +156,7 @@ interface PendataanDao {
         FROM pendataan
         WHERE id_petugas = :idPetugas
           AND kode_sls != ''
+          AND replace_existing = 0
           AND status_kirim IN ('SIAP_KIRIM', 'MENGIRIM', 'GAGAL')
         GROUP BY kode_sls
         """

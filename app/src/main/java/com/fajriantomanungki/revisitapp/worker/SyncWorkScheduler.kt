@@ -37,8 +37,9 @@ class SyncWorkScheduler @Inject constructor(
                 workDataOf(SyncWorker.KEY_ID_PETUGAS to idPetugas.trim())
             )
             /*
-             * WorkManager memiliki batas minimum backoff. Dengan 15 detik,
-             * jadwal exponential menjadi kurang lebih 15, 30, lalu 60 detik.
+             * WorkManager memiliki batas minimum backoff 10 detik. Dengan
+             * nilai ini, jadwal exponential menjadi kurang lebih 10, 20,
+             * lalu 40 detik dan tetap memenuhi retry tanpa busy-loop.
              */
             .setBackoffCriteria(
                 BackoffPolicy.EXPONENTIAL,
@@ -66,6 +67,6 @@ class SyncWorkScheduler @Inject constructor(
 
     private companion object {
         const val TAG_SYNC = "sync-pendataan"
-        const val INITIAL_BACKOFF_SECONDS = 15L
+        const val INITIAL_BACKOFF_SECONDS = 10L
     }
 }

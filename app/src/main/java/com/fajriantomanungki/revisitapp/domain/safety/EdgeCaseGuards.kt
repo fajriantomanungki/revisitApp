@@ -146,10 +146,25 @@ data class LogoutCheckResult(
 /** Menolak logout jika masih ada pekerjaan lokal yang belum terselesaikan. */
 class LogoutGuard @Inject constructor(
     private val pendataanDao: PendataanDao,
-    private val laporanKegiatanDao: LaporanKegiatanDao
+    private val laporanKegiatanDao: LaporanKegiatanDao,
+    private val sessionCoordinator: LocalSessionCoordinator
 ) {
 
-    suspend fun check(idPetugas: String): LogoutCheckResult {
+    suspend fun check(idPetugas: String): LogoutCheckResult =
+        sessionCoordinator.withMutationLock {
+            checkUnlocked(idPetugas)
+        }
+
+    suspend fun logoutIfAllowed(
+        idPetugas: String,
+        clearSession: suspend () -> Unit
+    ): LogoutCheckResult = sessionCoordinator.withMutationLock {
+        val result = checkUnlocked(idPetugas)
+        if (result.canLogout) clearSession()
+        result
+    }
+
+    private suspend fun checkUnlocked(idPetugas: String): LogoutCheckResult {
         if (idPetugas.isBlank()) {
             return LogoutCheckResult(
                 canLogout = false,
@@ -203,15 +218,6 @@ class LogoutGuard @Inject constructor(
                 "selesaikan pengiriman sebelum logout.",
             laporanCount = laporanCount
         )
-    }
-
-    suspend fun logoutIfAllowed(
-        idPetugas: String,
-        clearSession: suspend () -> Unit
-    ): LogoutCheckResult {
-        val result = check(idPetugas)
-        if (result.canLogout) clearSession()
-        return result
     }
 
     private fun List<PendataanStatusCount>.countFor(status: String): Long =
