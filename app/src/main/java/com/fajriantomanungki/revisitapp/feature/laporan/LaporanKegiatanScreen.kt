@@ -120,7 +120,9 @@ fun LaporanKegiatanScreen(
                     }
                     if (siapKirim) onSend()
                 },
-                onFailure = { errorMessage = error.message ?: "Laporan gagal disimpan." }
+                onFailure = { throwable ->
+                    errorMessage = throwable.message ?: "Laporan gagal disimpan."
+                }
             )
         }
     }
