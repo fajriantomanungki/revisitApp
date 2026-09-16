@@ -29,6 +29,7 @@ import com.fajriantomanungki.revisitapp.feature.wilayah.WilayahSelection
 @Composable
 fun FormWilayahSection(
     wilayah: List<WilayahEntity>,
+    fixedKodeKabupaten: String? = null,
     modifier: Modifier = Modifier,
     initialSelection: WilayahSelection = WilayahSelection(),
     onSelectionChanged: (WilayahSelection) -> Unit
@@ -87,6 +88,7 @@ fun FormWilayahSection(
             } else {
                 CascadingWilayahSelector(
                     wilayah = wilayah,
+                    fixedKodeKabupaten = fixedKodeKabupaten,
                     initialSelection = initialSelection,
                     onSelectionChanged = onSelectionChanged
                 )

@@ -17,6 +17,7 @@ import com.fajriantomanungki.revisitapp.data.local.model.UuidV4
     tableName = "pendataan",
     indices = [
         Index(value = ["id_petugas"]),
+        Index(value = ["kode_kab"]),
         Index(value = ["kode_sls"]),
         Index(value = ["status_kirim"]),
         Index(value = ["waktu_dibuat"]),
@@ -30,6 +31,12 @@ data class PendataanEntity(
 
     @ColumnInfo(name = "id_petugas")
     val idPetugas: String,
+
+    @ColumnInfo(name = "kode_kab", defaultValue = "''")
+    val kodeKab: String = "",
+
+    @ColumnInfo(name = "kabupaten", defaultValue = "''")
+    val kabupaten: String = "",
 
     @ColumnInfo(name = "kode_kec")
     val kodeKec: String = "",

@@ -69,7 +69,6 @@ import com.fajriantomanungki.revisitapp.domain.media.WatermarkedPhoto
 import com.fajriantomanungki.revisitapp.domain.media.WatermarkEngine
 import com.fajriantomanungki.revisitapp.domain.safety.LocationAuditResult
 import com.fajriantomanungki.revisitapp.domain.safety.LocationIntegrityChecker
-import com.fajriantomanungki.revisitapp.domain.safety.SlsCentroid
 import com.fajriantomanungki.revisitapp.feature.wilayah.WilayahSelection
 import java.io.File
 import java.text.SimpleDateFormat
@@ -83,6 +82,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun PendataanFormScreen(
     idPetugas: String,
+    kodeKabupaten: String,
     wilayah: List<WilayahEntity>,
     locationHelper: LocationHelper,
     watermarkEngine: WatermarkEngine,
@@ -181,16 +181,9 @@ fun PendataanFormScreen(
         locationDisabled = false
         when (val result = locationHelper.captureCurrentLocation()) {
             is LocationCaptureResult.Success -> {
-                val centroid = selection.sls?.let {
-                    SlsCentroid(
-                        latitude = it.latCentroid ?: Double.NaN,
-                        longitude = it.lonCentroid ?: Double.NaN
-                    )
-                }
                 capturedLocation = result.location
                 locationAudit = locationChecker.inspect(
-                    location = result.location,
-                    centroid = centroid
+                    location = result.location
                 )
             }
 
@@ -432,18 +425,13 @@ fun PendataanFormScreen(
 
             FormWilayahSection(
                 wilayah = wilayah,
+                fixedKodeKabupaten = kodeKabupaten,
                 initialSelection = selection,
                 onSelectionChanged = {
                     selection = it
                     if (capturedLocation != null) {
                         locationAudit = locationChecker.inspect(
-                            capturedLocation!!,
-                            it.sls?.let { sls ->
-                                SlsCentroid(
-                                    sls.latCentroid ?: Double.NaN,
-                                    sls.lonCentroid ?: Double.NaN
-                                )
-                            }
+                            capturedLocation!!
                         )
                     }
                 }

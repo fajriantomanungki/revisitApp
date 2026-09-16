@@ -14,6 +14,7 @@ import androidx.compose.runtime.setValue
 import com.fajriantomanungki.revisitapp.data.dashboard.DashboardCoverageRepository
 import com.fajriantomanungki.revisitapp.data.local.dao.PendataanDao
 import com.fajriantomanungki.revisitapp.data.local.dao.WilayahDao
+import com.fajriantomanungki.revisitapp.data.local.dao.CakupanCacheDao
 import com.fajriantomanungki.revisitapp.data.master.MasterWilayahRepository
 import com.fajriantomanungki.revisitapp.data.dashboard.CakupanSyncRepository
 import com.fajriantomanungki.revisitapp.data.pendataan.PendataanRepository
@@ -41,6 +42,9 @@ class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var pendataanDao: PendataanDao
+
+    @Inject
+    lateinit var cakupanCacheDao: CakupanCacheDao
 
     @Inject
     lateinit var syncConfigStore: SyncConfigStore
@@ -86,7 +90,11 @@ class MainActivity : ComponentActivity() {
                     mutableStateOf(syncConfigStore.read())
                 }
 
-                if (activeConfig == null) {
+                val cachedIdentity = activeConfig?.let {
+                    syncConfigStore.readCachedIdentity()
+                }
+
+                if (activeConfig == null || cachedIdentity?.kodeKabupaten.isNullOrBlank()) {
                     LoginScreen { credentials ->
                         val serverConfig = syncConfigStore.readServerConfig()
                         if (serverConfig == null) {
@@ -114,7 +122,9 @@ class MainActivity : ComponentActivity() {
                                     token = serverConfig.token,
                                     idPetugas = response.idPetugas,
                                     nama = response.nama,
-                                    pin = credentials.pin
+                                    pin = credentials.pin,
+                                    kodeKabupaten = response.kodeKabupaten,
+                                    kabupaten = response.kabupaten
                                 )
                                 activeConfig = syncConfigStore.read()
                                     ?: error("Sesi berhasil tetapi gagal disimpan")
@@ -125,17 +135,18 @@ class MainActivity : ComponentActivity() {
                 } else {
                     val config = requireNotNull(activeConfig)
                     val idPetugas = config.idPetugas
+                    val identity = requireNotNull(cachedIdentity)
                     val wilayah by wilayahDao.observeAll()
                         .collectAsState(initial = emptyList())
+                    val wilayahPetugas = wilayah.filter {
+                        it.kodeKab == identity.kodeKabupaten
+                    }
                     val pendataan by pendataanDao.observeAll(idPetugas)
                         .collectAsState(initial = emptyList())
                     val dashboardSnapshot by dashboardCoverageRepository
                         .observe(idPetugas)
                         .collectAsState(
-                            initial = com.fajriantomanungki.revisitapp.data.dashboard.DashboardCoverageSnapshot(
-                                coverage = emptyList(),
-                                lastServerSyncMillis = null
-                            )
+                            initial = com.fajriantomanungki.revisitapp.data.dashboard.DashboardCoverageSnapshot()
                         )
                     val coroutineScope = rememberCoroutineScope()
                     var isMasterRefreshing by rememberSaveable { mutableStateOf(false) }
@@ -144,7 +155,9 @@ class MainActivity : ComponentActivity() {
 
                     RevisitAppShell(
                         idPetugas = idPetugas,
-                        wilayah = wilayah,
+                        kodeKabupaten = identity.kodeKabupaten,
+                        kabupaten = identity.kabupaten,
+                        wilayah = wilayahPetugas,
                         pendataan = pendataan,
                         dashboardSnapshot = dashboardSnapshot,
                         locationHelper = locationHelper,
@@ -204,6 +217,7 @@ class MainActivity : ComponentActivity() {
                         },
                         onLogout = {
                             logoutGuard.logoutIfAllowed(idPetugas) {
+                                cakupanCacheDao.deleteAll()
                                 syncConfigStore.clearSession()
                                 activeConfig = null
                             }

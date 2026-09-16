@@ -43,11 +43,6 @@ android {
             useSupportLibrary = true
         }
 
-        manifestPlaceholders["MAPS_API_KEY"] =
-            project.findProperty("MAPS_API_KEY")?.toString()
-                ?.takeIf { it.isNotBlank() }
-                ?: localProperties.getProperty("MAPS_API_KEY").orEmpty()
-
         buildConfigField("String", "APPS_SCRIPT_URL", appsScriptUrl.toBuildConfigString())
         buildConfigField("String", "APPS_SCRIPT_TOKEN", appsScriptToken.toBuildConfigString())
     }
@@ -120,8 +115,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
     implementation("com.google.android.gms:play-services-location:21.3.0")
-    implementation("com.google.android.gms:play-services-maps:19.0.0")
-    implementation("com.google.maps.android:maps-compose:6.4.1")
     implementation("androidx.camera:camera-camera2:1.4.1")
     implementation("androidx.camera:camera-lifecycle:1.4.1")
     implementation("androidx.camera:camera-view:1.4.1")

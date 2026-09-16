@@ -48,6 +48,7 @@ import com.fajriantomanungki.revisitapp.data.local.entity.WilayahEntity
 fun MasterWilayahScreen(
     wilayah: List<WilayahEntity>,
     modifier: Modifier = Modifier,
+    fixedKodeKabupaten: String? = null,
     versiMaster: Int? = wilayah.maxOfOrNull { it.versiMaster },
     isRefreshing: Boolean = false,
     initialSelection: WilayahSelection = WilayahSelection(),
@@ -77,6 +78,7 @@ fun MasterWilayahScreen(
         MasterWilayahContent(
             paddingValues = paddingValues,
             wilayah = wilayah,
+            fixedKodeKabupaten = fixedKodeKabupaten,
             versiMaster = versiMaster,
             isRefreshing = isRefreshing,
             initialSelection = initialSelection,
@@ -90,6 +92,7 @@ fun MasterWilayahScreen(
 private fun MasterWilayahContent(
     paddingValues: PaddingValues,
     wilayah: List<WilayahEntity>,
+    fixedKodeKabupaten: String?,
     versiMaster: Int?,
     isRefreshing: Boolean,
     initialSelection: WilayahSelection,
@@ -212,6 +215,7 @@ private fun MasterWilayahContent(
                     )
                     CascadingWilayahSelector(
                         wilayah = wilayah,
+                        fixedKodeKabupaten = fixedKodeKabupaten,
                         initialSelection = initialSelection,
                         onSelectionChanged = onSelectionChanged,
                         modifier = Modifier.fillMaxWidth()

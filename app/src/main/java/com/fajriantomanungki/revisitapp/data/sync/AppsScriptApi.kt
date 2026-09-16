@@ -46,8 +46,6 @@ data class RemoteWilayahRow(
     val kodeSls: String,
     val namaSls: String,
     val targetResponden: Int,
-    val latCentroid: Double?,
-    val lonCentroid: Double?,
     val version: Int
 )
 
@@ -70,7 +68,8 @@ data class CoverageApiResponse(
 data class LoginApiResponse(
     val idPetugas: String,
     val nama: String,
-    val wilayahPenugasan: String?,
+    val kodeKabupaten: String,
+    val kabupaten: String,
     val waktuServer: String?
 )
 
@@ -181,8 +180,6 @@ class AppsScriptApi @Inject constructor() {
                     .coerceAtLeast(0L)
                     .coerceAtMost(Int.MAX_VALUE.toLong())
                     .toInt(),
-                latCentroid = item.optionalFiniteDouble("lat_centroid"),
-                lonCentroid = item.optionalFiniteDouble("lon_centroid"),
                 version = item.optInt("versi_master", version)
             )
         }
@@ -268,8 +265,10 @@ class AppsScriptApi @Inject constructor() {
         LoginApiResponse(
             idPetugas = responseId,
             nama = response.optString("nama", "").trim(),
-            wilayahPenugasan = response.optString("wilayah_penugasan", "")
-                .takeIf { it.isNotBlank() },
+            kodeKabupaten = response.optString("kode_kabupaten", "")
+                .ifBlank { response.optString("kode_kab", "") }
+                .trim(),
+            kabupaten = response.optString("kabupaten", "").trim(),
             waktuServer = response.optString("waktu_server", "")
                 .takeIf { it.isNotBlank() }
         )
@@ -341,6 +340,8 @@ class AppsScriptApi @Inject constructor() {
         val recordJson = JSONObject()
             .put("id_record", record.idRecord)
             .put("id_petugas", record.idPetugas)
+            .put("kode_kab", record.kodeKab)
+            .put("kabupaten", record.kabupaten)
             .put("kode_kec", record.kodeKec)
             .put("nama_kec", record.namaKec)
             .put("kode_desa", record.kodeDesa)
@@ -561,11 +562,6 @@ class AppsScriptApi @Inject constructor() {
                 cause = error
             )
         }
-    }
-
-    private fun JSONObject.optionalFiniteDouble(name: String): Double? {
-        if (!has(name) || isNull(name)) return null
-        return optDouble(name, Double.NaN).takeIf { it.isFinite() }
     }
 
     private fun readResponseBody(

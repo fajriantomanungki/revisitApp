@@ -2,8 +2,6 @@ package com.fajriantomanungki.revisitapp.feature.app
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -72,6 +70,8 @@ import kotlinx.coroutines.launch
 @Composable
 fun RevisitAppShell(
     idPetugas: String,
+    kodeKabupaten: String,
+    kabupaten: String,
     wilayah: List<WilayahEntity>,
     pendataan: List<PendataanEntity>,
     dashboardSnapshot: DashboardCoverageSnapshot,
@@ -194,6 +194,7 @@ fun RevisitAppShell(
     if (isFormOpen) {
         PendataanFormScreen(
             idPetugas = idPetugas,
+            kodeKabupaten = kodeKabupaten,
             wilayah = wilayah,
             locationHelper = locationHelper,
             watermarkEngine = watermarkEngine,
@@ -248,6 +249,7 @@ fun RevisitAppShell(
             0 -> PendataanListScreen(
                 modifier = Modifier.padding(paddingValues),
                 idPetugas = idPetugas,
+                kabupaten = kabupaten,
                 rows = pendataan,
                 onSend = onSend,
                 canAdd = wilayah.isNotEmpty(),
@@ -291,6 +293,7 @@ fun RevisitAppShell(
             1 -> MasterWilayahScreen(
                 modifier = Modifier.padding(paddingValues),
                 wilayah = wilayah,
+                fixedKodeKabupaten = kodeKabupaten,
                 isRefreshing = isMasterRefreshing,
                 onRefreshMaster = onRefreshMaster
             )
@@ -299,44 +302,7 @@ fun RevisitAppShell(
                 modifier = Modifier.padding(paddingValues),
                 snapshot = dashboardSnapshot,
                 isRefreshing = isCoverageRefreshing,
-                onRefreshCoverage = onRefreshCoverage,
-                onNavigate = { sls ->
-                    val latitude = sls.latCentroid
-                    val longitude = sls.lonCentroid
-                    if (latitude == null || longitude == null) {
-                        coroutineScope.launch {
-                            snackbarHostState.showSnackbar(
-                                "Centroid SLS belum tersedia untuk navigasi."
-                            )
-                        }
-                    } else {
-                        runCatching {
-                            context.startActivity(
-                                Intent(
-                                    Intent.ACTION_VIEW,
-                                    Uri.parse(
-                                        "geo:$latitude,$longitude?q=$latitude,$longitude(" +
-                                            Uri.encode(sls.namaSls) + ")"
-                                    )
-                                )
-                            )
-                        }.onFailure {
-                            coroutineScope.launch {
-                                snackbarHostState.showSnackbar(
-                                    "Tidak ada aplikasi peta yang dapat dibuka."
-                                )
-                            }
-                        }
-                    }
-                },
-                onOpenSlsData = { kodeSls ->
-                    selectedTab = 0
-                    coroutineScope.launch {
-                        snackbarHostState.showSnackbar(
-                            "Daftar pendataan untuk SLS $kodeSls dipilih."
-                        )
-                    }
-                }
+                onRefreshCoverage = onRefreshCoverage
             )
         }
     }
@@ -346,6 +312,7 @@ fun RevisitAppShell(
 private fun PendataanListScreen(
     modifier: Modifier,
     idPetugas: String,
+    kabupaten: String,
     rows: List<PendataanEntity>,
     onSend: () -> Unit,
     canAdd: Boolean,
@@ -392,6 +359,13 @@ private fun PendataanListScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    if (kabupaten.isNotBlank()) {
+                        Text(
+                            text = "Kabupaten kerja: $kabupaten",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
                 OutlinedButton(
                     onClick = onLogout,

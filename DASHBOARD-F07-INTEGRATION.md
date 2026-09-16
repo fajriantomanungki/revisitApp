@@ -1,64 +1,66 @@
-# Integrasi Dashboard F-07
+# Integrasi Dashboard Progress
 
-## File yang ditambahkan
+Dashboard admin menggunakan Spreadsheet yang sama dengan API Android.
+Perubahan ini tidak membuat sumber data baru dan tidak mengubah alur
+offline-first pada aplikasi.
 
-- `domain/coverage/CoverageCalculator.kt`
-  - Lima kelas warna F-07.
-  - Kalkulasi `jumlah_terdata / target_responden`.
-  - Penggabungan snapshot server dan data lokal belum terkirim.
-- `data/dashboard/DashboardCoverageRepository.kt`
-  - Menggabungkan `wilayah`, `cakupan_cache`, dan agregat lokal dari Room
-    secara reaktif.
-- `feature/dashboard/DashboardScreen.kt`
-  - Peta marker centroid, legenda, filter kecamatan/desa, toggle penugasan,
-    detail SLS, dan daftar 10 SLS dengan cakupan terendah.
+## Isi dashboard
 
-## Dependensi peta
+- Progress total per kabupaten.
+- Progress per kecamatan.
+- Progress per petugas.
+- Input dan pembaruan petugas.
+- Import master wilayah Kabupaten–Kecamatan–Desa–SLS.
+- Pembuatan laporan PDF per petugas.
 
-Tambahkan pada `app` module:
+Target seorang petugas aktif adalah 126 responden (`14 SLS × 9 responden`).
+Target kabupaten dihitung dari jumlah petugas aktif dikalikan 126, sedangkan
+realisasi adalah jumlah record pendataan yang sudah diterima Spreadsheet.
 
-````kotlin
-implementation("com.google.maps.android:maps-compose:8.4.0")
-````
+## Scope petugas
 
-API key Maps SDK perlu didaftarkan pada manifest, misalnya:
+Sheet `petugas` wajib memiliki kolom:
 
-````xml
-<meta-data
-    android:name="com.google.android.geo.API_KEY"
-    android:value="${MAPS_API_KEY}" />
-````
+```text
+id_petugas,nama,hash_pin,kode_kabupaten,kabupaten,aktif
+```
 
-Simpan nilai key melalui `local.properties`/secret Gradle. Jangan commit key
-asli ke repository.
+Petugas boleh memilih wilayah secara mandiri, tetapi hanya pada kabupaten
+yang sama dengan `kode_kabupaten` miliknya. Validasi dilakukan di UI Android
+dan di server Apps Script.
 
-## Contoh penghubungan Room ke layar
+## Data master
 
-````kotlin
+Header `master_wilayah` yang digunakan:
+
+```text
+kode_kab,kabupaten,kode_kec,nama_kec,kode_desa,nama_desa,
+kode_sls,nama_sls,target_responden,versi_master
+```
+
+Kolom centroid dan sheet penugasan tidak lagi digunakan. Setelah backup
+Spreadsheet lama, jalankan `migrateBackendSchema()` sekali untuk menghapus
+kolom legacy serta sheet `penugasan`, lalu isi kabupaten setiap petugas pada
+menu Manajemen Petugas.
+
+## Sinkronisasi cache Android
+
+`CakupanSyncRepository` mengambil rekap server melalui `GET action=cakupan`
+dan menyimpannya pada `cakupan_cache`. Dashboard Android menambahkan record
+lokal berstatus `SIAP_KIRIM`, `MENGIRIM`, atau `GAGAL`, sehingga angka progres
+tetap informatif ketika perangkat offline.
+
+Contoh penghubungan:
+
+```kotlin
 val snapshot by dashboardCoverageRepository
-    .observe(idPetugas = idPetugas)
-    .collectAsState(
-        initial = DashboardCoverageSnapshot(
-            coverage = emptyList(),
-            lastServerSyncMillis = null
-        )
-    )
+    .observe(idPetugas)
+    .collectAsState(initial = DashboardCoverageSnapshot())
 
 DashboardScreen(
     snapshot = snapshot,
-    assignedSlsCodes = assignedSlsCodes,
-    onNavigate = { sls ->
-        // Buka Google Maps menggunakan sls.latCentroid/lonCentroid.
-    },
-    onOpenSlsData = { kodeSls ->
-        // Navigasi ke daftar pendataan pada SLS tersebut.
-    },
-    onRefreshCoverage = {
-        // Ambil GET action=cakupan, lalu cakupanCacheDao.replaceAll(...).
-    }
+    onRefreshCoverage = { /* refresh cache server */ }
 )
-````
+```
 
-`observeLocalCoverage()` hanya menghitung status `SIAP_KIRIM`, `MENGIRIM`,
-dan `GAGAL`. Status `TERKIRIM` tidak ditambahkan lagi karena sudah tercermin
-di snapshot server.
+Tidak ada dependensi Google Maps pada modul dashboard Android.

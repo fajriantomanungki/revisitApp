@@ -46,12 +46,14 @@ var CONFIG = {
   MAX_REPORT_PHOTOS: 300,
   REPORT_PHOTO_MAX_WIDTH: 240,
   REPORT_PHOTO_MAX_HEIGHT: 170,
+  SLS_PER_PETUGAS: 14,
+  RESPONDEN_PER_SLS: 9,
+  TARGET_PER_PETUGAS: 14 * 9,
   LOCK_TIMEOUT_MS: 30 * 1000,
   MAX_TIME_DRIFT_MS: 10 * 60 * 1000,
   DEFAULT_TIMEZONE: 'Asia/Makassar',
   SHEETS: {
     PETUGAS: 'petugas',
-    PENUGASAN: 'penugasan',
     MASTER_WILAYAH: 'master_wilayah',
     PENDATAAN: 'pendataan',
     REKAP_CAKUPAN: 'rekap_cakupan',
@@ -64,20 +66,9 @@ var SHEET_HEADERS = {
     'id_petugas',
     'nama',
     'hash_pin',
-    'wilayah_penugasan',
+    'kode_kabupaten',
+    'kabupaten',
     'aktif'
-  ],
-  PENUGASAN: [
-    'id_penugasan',
-    'id_petugas',
-    'kode_kab',
-    'kode_kec',
-    'kode_desa',
-    'kode_sls',
-    'aktif',
-    'keterangan',
-    'created_at',
-    'updated_at'
   ],
   MASTER_WILAYAH: [
     'kode_kab',
@@ -89,13 +80,13 @@ var SHEET_HEADERS = {
     'kode_sls',
     'nama_sls',
     'target_responden',
-    'lat_centroid',
-    'lon_centroid',
     'versi_master'
   ],
   PENDATAAN: [
     'id_record',
     'id_petugas',
+    'kode_kab',
+    'kabupaten',
     'kode_kec',
     'nama_kec',
     'kode_desa',
@@ -293,11 +284,22 @@ function handleLogin_(payload) {
     );
   }
 
+  var kodeKabupaten = getWorkerCountyCode_(worker);
+  var namaKabupaten = getWorkerCountyName_(worker);
+  if (!kodeKabupaten || !namaKabupaten) {
+    throw new ApiError(
+      'KABUPATEN_PETUGAS_BELUM_DIATUR',
+      'Kabupaten asal petugas belum diatur pada sheet petugas.'
+    );
+  }
+
   return jsonResponse_({
     ok: true,
     id_petugas: idPetugas,
     nama: toText_(worker.nama),
-    wilayah_penugasan: worker.wilayah_penugasan,
+    kode_kabupaten: kodeKabupaten,
+    kode_kab: kodeKabupaten,
+    kabupaten: namaKabupaten,
     waktu_server: new Date().toISOString()
   });
 }
@@ -654,10 +656,28 @@ function normalizeRecordForSync_(
     );
   }
 
-  if (!isAssignmentAllowed_(kodeSls, worker)) {
+  var workerCountyCode = getWorkerCountyCode_(worker);
+  if (!workerCountyCode) {
     throw new ApiError(
-      'WILAYAH_DI_LUAR_PENUGASAN',
-      'Record berada di luar wilayah penugasan petugas.'
+      'KABUPATEN_PETUGAS_BELUM_DIATUR',
+      'Kabupaten asal petugas belum diatur pada sheet petugas.'
+    );
+  }
+
+  if (master.kode_kab !== workerCountyCode) {
+    throw new ApiError(
+      'WILAYAH_DI_LUAR_KABUPATEN',
+      'Petugas hanya dapat memilih wilayah pada kabupaten asalnya.'
+    );
+  }
+
+  var recordCountyCode = toText_(
+    record.kode_kab || record.kode_kabupaten
+  );
+  if (recordCountyCode && recordCountyCode !== master.kode_kab) {
+    throw new ApiError(
+      'KABUPATEN_TIDAK_SESUAI',
+      'kode_kab pada record tidak sesuai dengan master wilayah.'
     );
   }
 
@@ -751,6 +771,8 @@ function normalizeRecordForSync_(
   return {
     id_record: requireUuidV4_(record.id_record, 'id_record'),
     id_petugas: idPetugas,
+    kode_kab: master.kode_kab,
+    kabupaten: master.kabupaten,
     kode_kec: master.kode_kec,
     nama_kec: master.nama_kec,
     kode_desa: master.kode_desa,
@@ -783,6 +805,8 @@ function buildPendataanRow_(record, headers) {
   var cells = {
     id_record: record.id_record,
     id_petugas: record.id_petugas,
+    kode_kab: record.kode_kab,
+    kabupaten: record.kabupaten,
     kode_kec: record.kode_kec,
     nama_kec: record.nama_kec,
     kode_desa: record.kode_desa,
@@ -1012,7 +1036,10 @@ function computeCoverageData_(worker) {
       return;
     }
 
-    if (!isAssignmentAllowed_(kodeSls, worker)) {
+    if (
+      toText_(row.id_petugas).toLowerCase() !==
+      toText_(worker.id_petugas).toLowerCase()
+    ) {
       return;
     }
 
@@ -1026,7 +1053,7 @@ function computeCoverageData_(worker) {
 
   return masterRows
     .filter(function(master) {
-      return isAssignmentAllowed_(master.kode_sls, worker);
+      return isWorkerInCounty_(master, worker);
     })
     .map(function(master) {
       return {
@@ -1137,10 +1164,6 @@ function setupBackend() {
         headers: SHEET_HEADERS.PETUGAS
       },
       {
-        name: CONFIG.SHEETS.PENUGASAN,
-        headers: SHEET_HEADERS.PENUGASAN
-      },
-      {
         name: CONFIG.SHEETS.MASTER_WILAYAH,
         headers: SHEET_HEADERS.MASTER_WILAYAH
       },
@@ -1176,6 +1199,99 @@ function setupBackend() {
   } finally {
     lock.releaseLock();
   }
+}
+
+/**
+ * Migrasi satu kali untuk spreadsheet yang dibuat dari versi sebelumnya.
+ *
+ * Backup spreadsheet terlebih dahulu, lalu jalankan fungsi ini sekali dari
+ * editor Apps Script. Fungsi ini menghapus kolom lama yang sudah tidak
+ * dipakai dan sheet penugasan legacy; nilai kabupaten petugas tetap harus
+ * diisi melalui dashboard karena tidak dapat ditebak dari data lama.
+ */
+function migrateBackendSchema() {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(CONFIG.LOCK_TIMEOUT_MS)) {
+    throw new Error('Server sedang sibuk. Coba lagi.');
+  }
+
+  try {
+    var spreadsheet = getSpreadsheet_();
+    var petugas = spreadsheet.getSheetByName(CONFIG.SHEETS.PETUGAS);
+    var master = spreadsheet.getSheetByName(CONFIG.SHEETS.MASTER_WILAYAH);
+    var pendataan = spreadsheet.getSheetByName(CONFIG.SHEETS.PENDATAAN);
+
+    if (petugas) {
+      removeColumnsByHeader_(petugas, ['wilayah_penugasan']);
+    }
+    if (master) {
+      removeColumnsByHeader_(master, ['lat_centroid', 'lon_centroid']);
+    }
+
+    var legacySheet = spreadsheet.getSheetByName('penugasan');
+    var legacySheetRemoved = false;
+    if (legacySheet) {
+      /*
+       * Google Sheets tidak mengizinkan penghapusan satu-satunya sheet.
+       * Siapkan sheet tujuan sementara agar migrasi tetap benar-benar dapat
+       * menghapus sheet legacy pada spreadsheet lama yang sangat minimal.
+       */
+      if (spreadsheet.getSheets().length === 1) {
+        spreadsheet.insertSheet(CONFIG.SHEETS.MASTER_WILAYAH);
+      }
+      spreadsheet.deleteSheet(legacySheet);
+      legacySheetRemoved = true;
+    }
+
+    [
+      {
+        name: CONFIG.SHEETS.PETUGAS,
+        headers: SHEET_HEADERS.PETUGAS
+      },
+      {
+        name: CONFIG.SHEETS.MASTER_WILAYAH,
+        headers: SHEET_HEADERS.MASTER_WILAYAH
+      },
+      {
+        name: CONFIG.SHEETS.PENDATAAN,
+        headers: SHEET_HEADERS.PENDATAAN
+      }
+    ].forEach(function(definition) {
+      ensureSheetWithHeaders_(
+        spreadsheet,
+        definition.name,
+        definition.headers
+      );
+    });
+
+    return {
+      ok: true,
+      legacy_sheet_removed: legacySheetRemoved,
+      note: 'Isi kode_kabupaten dan kabupaten untuk setiap petugas aktif.'
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function removeColumnsByHeader_(sheet, headersToRemove) {
+  var targets = headersToRemove.map(function(header) {
+    return String(header).trim();
+  });
+  var columns = getSheetHeaders_(sheet)
+    .map(function(header, index) {
+      return targets.indexOf(header) >= 0 ? index + 1 : 0;
+    })
+    .filter(function(column) {
+      return column > 0;
+    })
+    .sort(function(left, right) {
+      return right - left;
+    });
+
+  columns.forEach(function(column) {
+    sheet.deleteColumn(column);
+  });
 }
 
 /**
@@ -1287,21 +1403,56 @@ function ensureSheetWithHeaders_(spreadsheet, sheetName, headers) {
       .getRange(1, 1, 1, headers.length)
       .setFontWeight('bold');
   } else {
-    assertRequiredHeaders_(
-      currentHeaders,
-      headers,
-      sheetName
-    );
+    var missingHeaders = headers.filter(function(header) {
+      return currentHeaders.indexOf(header) === -1;
+    });
+    if (missingHeaders.length > 0) {
+      sheet
+        .getRange(1, currentHeaders.length + 1, 1, missingHeaders.length)
+        .setValues([missingHeaders]);
+      sheet
+        .getRange(
+          1,
+          currentHeaders.length + 1,
+          1,
+          missingHeaders.length
+        )
+        .setFontWeight('bold');
+    }
   }
 
   sheet.setFrozenRows(1);
 
-  if (sheetName === CONFIG.SHEETS.MASTER_WILAYAH) {
-    [1, 3, 5].forEach(function(column) {
-      sheet.getRange(2, column, Math.max(sheet.getMaxRows() - 1, 1))
+  var textColumnsBySheet = {};
+  textColumnsBySheet[CONFIG.SHEETS.PETUGAS] = [
+    'id_petugas',
+    'kode_kabupaten'
+  ];
+  textColumnsBySheet[CONFIG.SHEETS.MASTER_WILAYAH] = [
+    'kode_kab',
+    'kode_kec',
+    'kode_desa',
+    'kode_sls'
+  ];
+  textColumnsBySheet[CONFIG.SHEETS.PENDATAAN] = [
+    'id_record',
+    'id_petugas',
+    'kode_kab',
+    'kode_kec',
+    'kode_desa',
+    'kode_sls'
+  ];
+
+  var textHeaders = textColumnsBySheet[sheetName] || [];
+  var refreshedHeaders = getSheetHeaders_(sheet);
+  textHeaders.forEach(function(header) {
+    var columnIndex = refreshedHeaders.indexOf(header);
+    if (columnIndex >= 0) {
+      sheet
+        .getRange(2, columnIndex + 1, Math.max(sheet.getMaxRows() - 1, 1))
         .setNumberFormat('@');
-    });
-  }
+    }
+  });
 }
 
 function getSheetHeaders_(sheet) {
@@ -1411,8 +1562,6 @@ function getMasterRecords_() {
         row.target_responden,
         0
       ),
-      lat_centroid: optionalNumber_(row.lat_centroid),
-      lon_centroid: optionalNumber_(row.lon_centroid),
       versi_master: toNonNegativeInteger_(
         row.versi_master,
         0
@@ -1466,8 +1615,6 @@ function masterToApiRecord_(master) {
     kode_sls: master.kode_sls,
     nama_sls: master.nama_sls,
     target_responden: master.target_responden,
-    lat_centroid: master.lat_centroid,
-    lon_centroid: master.lon_centroid,
     versi_master: master.versi_master
   };
 }
@@ -1485,7 +1632,8 @@ function getActiveWorkerById_(idPetugas) {
       found = {
         id_petugas: idPetugas,
         nama: toText_(row.nama),
-        wilayah_penugasan: row.wilayah_penugasan,
+        kode_kabupaten: getWorkerCountyCode_(row),
+        kabupaten: getWorkerCountyName_(row),
         aktif: normalizeBoolean_(
           row.aktif,
           'aktif',
@@ -1509,137 +1657,39 @@ function getActiveWorkerById_(idPetugas) {
     );
   }
 
+  if (!found.kode_kabupaten || !found.kabupaten) {
+    throw new ApiError(
+      'KABUPATEN_PETUGAS_BELUM_DIATUR',
+      'Kabupaten asal petugas belum diatur pada sheet petugas.'
+    );
+  }
+
   return found;
 }
 
-function isAssignmentAllowed_(kodeSls, worker) {
-  var assignments = getWorkerAssignmentCodes_(worker);
-
-  /*
-   * Wilayah penugasan kosong berarti seluruh wilayah. Untuk pembatasan
-   * wilayah, isi dengan kode kecamatan/desa/SLS yang dipisahkan koma,
-   * titik koma, atau array JSON.
-   */
-  if (assignments.length === 0) {
-    return true;
-  }
-
-  return assignments.some(function(assignment) {
-    var code = String(assignment).trim();
-    if (!code || code === '*' || code.toUpperCase() === 'SEMUA') {
-      return true;
-    }
-
-    return (
-      kodeSls.indexOf(code) === 0 ||
-      code.indexOf(kodeSls) === 0
-    );
-  });
-}
-
-/*
- * Sheet penugasan bersifat tambahan dan kompatibel mundur. Jika sheet belum
- * dibuat atau belum berisi baris untuk petugas, sistem tetap menggunakan
- * kolom petugas.wilayah_penugasan yang sudah dipakai oleh aplikasi Android.
- */
-function getWorkerAssignmentCodes_(worker) {
+function getWorkerCountyCode_(worker) {
   if (!worker) {
-    return [];
+    return '';
   }
 
-  if (
-    worker._assignmentCodesLoaded &&
-    Array.isArray(worker._assignmentCodes)
-  ) {
-    return worker._assignmentCodes;
-  }
-
-  var assignments = [];
-  var spreadsheet = getSpreadsheet_();
-  var sheet = spreadsheet.getSheetByName(CONFIG.SHEETS.PENUGASAN);
-
-  if (sheet) {
-    var headers = getSheetHeaders_(sheet);
-    var hasIdentityHeaders =
-      headers.indexOf('id_petugas') >= 0 &&
-      headers.indexOf('aktif') >= 0;
-
-    if (hasIdentityHeaders) {
-      readSheetObjectsFromSheet_(sheet).forEach(function(row) {
-        if (
-          toText_(row.id_petugas).toLowerCase() !==
-          toText_(worker.id_petugas).toLowerCase()
-        ) {
-          return;
-        }
-
-        var active = normalizeBoolean_(
-          row.aktif,
-          'aktif',
-          true
-        );
-        if (!active) {
-          return;
-        }
-
-        [
-          'kode_kab',
-          'kode_kec',
-          'kode_desa',
-          'kode_sls'
-        ].forEach(function(fieldName) {
-          var code = toText_(row[fieldName]);
-          if (code && assignments.indexOf(code) < 0) {
-            assignments.push(code);
-          }
-        });
-      });
-    }
-  }
-
-  if (assignments.length === 0) {
-    assignments = normalizeAssignments_(
-      worker.wilayah_penugasan
-    );
-  }
-
-  worker._assignmentCodes = assignments;
-  worker._assignmentCodesLoaded = true;
-  return assignments;
+  return toText_(
+    worker.kode_kabupaten || worker.kode_kab || ''
+  );
 }
 
-function normalizeAssignments_(value) {
-  if (value === null || value === undefined || value === '') {
-    return [];
+function getWorkerCountyName_(worker) {
+  if (!worker) {
+    return '';
   }
 
-  if (Array.isArray(value)) {
-    return value.map(function(item) {
-      return String(item).trim();
-    }).filter(function(item) {
-      return item !== '';
-    });
-  }
+  return toText_(worker.kabupaten || '');
+}
 
-  var text = String(value).trim();
-  if (!text) {
-    return [];
-  }
-
-  try {
-    var parsed = JSON.parse(text);
-    if (Array.isArray(parsed)) {
-      return normalizeAssignments_(parsed);
-    }
-  } catch (error) {
-    // Lanjutkan sebagai string daftar kode.
-  }
-
-  return text.split(/[,;|\s]+/).map(function(item) {
-    return item.trim();
-  }).filter(function(item) {
-    return item !== '';
-  });
+function isWorkerInCounty_(master, worker) {
+  return Boolean(master) &&
+    Boolean(worker) &&
+    getWorkerCountyCode_(worker) !== '' &&
+    toText_(master.kode_kab) === getWorkerCountyCode_(worker);
 }
 
 function getExistingRecordIndex_(sheet, headers) {
@@ -2305,7 +2355,8 @@ function getDashboardWorkers_() {
     return {
       id_petugas: toText_(row.id_petugas),
       nama: toText_(row.nama),
-      wilayah_penugasan: toText_(row.wilayah_penugasan),
+      kode_kabupaten: getWorkerCountyCode_(row),
+      kabupaten: getWorkerCountyName_(row),
       aktif: normalizeBoolean_(row.aktif, 'aktif', false)
     };
   });
@@ -2341,7 +2392,9 @@ function publicDashboardWorker_(worker) {
   return {
     id_petugas: worker.id_petugas,
     nama: worker.nama,
-    wilayah_penugasan: worker.wilayah_penugasan,
+    kode_kabupaten: worker.kode_kabupaten,
+    kode_kab: worker.kode_kabupaten,
+    kabupaten: worker.kabupaten,
     aktif: worker.aktif
   };
 }
@@ -2426,16 +2479,10 @@ function buildDashboardData_(filters) {
 
     if (
       matchesDashboardRegion_(master, filters) &&
-      (!selectedWorker ||
-        isAssignmentAllowed_(master.kode_sls, selectedWorker))
+      (!selectedWorker || isWorkerInCounty_(master, selectedWorker))
     ) {
       scopeMaster.push(master);
     }
-  });
-
-  var scopeSls = {};
-  scopeMaster.forEach(function(master) {
-    scopeSls[master.kode_sls] = true;
   });
 
   var records = [];
@@ -2467,7 +2514,7 @@ function buildDashboardData_(filters) {
     if (
       selectedWorker &&
       (!master ||
-        !isAssignmentAllowed_(kodeSls, selectedWorker))
+        !isWorkerInCounty_(master, selectedWorker))
     ) {
       return;
     }
@@ -2485,10 +2532,6 @@ function buildDashboardData_(filters) {
       (!recordDate ||
         recordDate.getTime() >= filters.dateToExclusive.getTime())
     ) {
-      return;
-    }
-
-    if (filters.id_petugas && !scopeSls[kodeSls]) {
       return;
     }
 
@@ -2524,6 +2567,47 @@ function buildDashboardData_(filters) {
     }, master);
   });
 
+  var workersInScope = workers.filter(function(worker) {
+    if (
+      selectedWorker &&
+      worker.id_petugas.toLowerCase() !==
+      selectedWorker.id_petugas.toLowerCase()
+    ) {
+      return false;
+    }
+
+    return !filters.kode_kab ||
+      getWorkerCountyCode_(worker) === filters.kode_kab;
+  });
+
+  workersInScope.forEach(function(worker) {
+    var workerKey = worker.id_petugas;
+    petugas[workerKey] = {
+      kode_kab: getWorkerCountyCode_(worker),
+      kabupaten: getWorkerCountyName_(worker),
+      id_petugas: worker.id_petugas,
+      nama: worker.nama || worker.id_petugas,
+      target: worker.aktif ? CONFIG.TARGET_PER_PETUGAS : 0,
+      terdata: 0,
+      jumlah_sls: 0,
+      lengkap: 0,
+      tidak_lengkap: 0,
+      mock: 0,
+      flag_waktu: 0
+    };
+
+    if (getWorkerCountyCode_(worker)) {
+      ensureDashboardAggregate_(
+        kabupaten,
+        getWorkerCountyCode_(worker),
+        {
+          kode_kab: getWorkerCountyCode_(worker),
+          kabupaten: getWorkerCountyName_(worker)
+        }
+      );
+    }
+  });
+
   records.forEach(function(record) {
     var kabKey = record.kode_kab ||
       record.kabupaten ||
@@ -2539,6 +2623,8 @@ function buildDashboardData_(filters) {
     var workerKey = record.id_petugas || 'TANPA_PETUGAS';
     if (!petugas[workerKey]) {
       petugas[workerKey] = {
+        kode_kab: record.kode_kab || '',
+        kabupaten: record.kabupaten || '',
         id_petugas: workerKey,
         nama: record.nama_petugas || workerKey,
         target: 0,
@@ -2553,46 +2639,37 @@ function buildDashboardData_(filters) {
     addDashboardRecord_(petugas, workerKey, record);
   });
 
-  workers.forEach(function(worker) {
+  objectValues_(kabupaten).forEach(function(aggregate) {
+    var workerCount = workersInScope.filter(function(worker) {
+      return worker.aktif &&
+        getWorkerCountyCode_(worker) === aggregate.kode_kab;
+    }).length;
+    aggregate.target = workerCount * CONFIG.TARGET_PER_PETUGAS;
+  });
+
+  var targetWorkers = workers.filter(function(worker) {
     if (
       selectedWorker &&
       worker.id_petugas.toLowerCase() !==
       selectedWorker.id_petugas.toLowerCase()
     ) {
-      return;
+      return false;
     }
-
-    var workerTargetRows = scopeMaster.filter(function(master) {
-      return isAssignmentAllowed_(master.kode_sls, worker);
-    });
-    var workerKey = worker.id_petugas;
-    if (!petugas[workerKey]) {
-      petugas[workerKey] = {
-        id_petugas: worker.id_petugas,
-        nama: worker.nama || worker.id_petugas,
-        target: 0,
-        terdata: 0,
-        jumlah_sls: 0,
-        lengkap: 0,
-        tidak_lengkap: 0,
-        mock: 0,
-        flag_waktu: 0
-      };
-    }
-
-    workerTargetRows.forEach(function(master) {
-      petugas[workerKey].target += master.target_responden;
-      petugas[workerKey].jumlah_sls += 1;
-    });
-    petugas[workerKey].nama = worker.nama || worker.id_petugas;
+    return !filters.kode_kab ||
+      getWorkerCountyCode_(worker) === filters.kode_kab;
   });
+  var dashboardTarget = targetWorkers.reduce(function(total, worker) {
+    return total + (
+      worker.aktif ? CONFIG.TARGET_PER_PETUGAS : 0
+    );
+  }, 0);
 
   var summary = {
-    target: sumDashboardField_(scopeMaster, 'target_responden'),
+    target: dashboardTarget,
     terdata: records.length,
     jumlah_record: records.length,
     jumlah_sls: scopeMaster.length,
-    jumlah_petugas: objectValues_(petugas).length,
+    jumlah_petugas: targetWorkers.length,
     lengkap: countDashboardStatus_(records, 'LENGKAP'),
     tidak_lengkap: countDashboardStatus_(
       records,
@@ -2632,6 +2709,27 @@ function buildDashboardData_(filters) {
       .sort(sortDashboardAggregate_),
     latest: records.slice(0, 100)
   };
+}
+
+function ensureDashboardAggregate_(map, key, identity) {
+  if (map[key]) {
+    return map[key];
+  }
+
+  map[key] = {
+    kode_kab: identity.kode_kab || '',
+    kabupaten: identity.kabupaten || '',
+    kode_kec: identity.kode_kec || '',
+    nama_kec: identity.nama_kec || '',
+    target: 0,
+    terdata: 0,
+    jumlah_sls: 0,
+    lengkap: 0,
+    tidak_lengkap: 0,
+    mock: 0,
+    flag_waktu: 0
+  };
+  return map[key];
 }
 
 function matchesDashboardRegion_(row, filters) {
@@ -2899,11 +2997,12 @@ function saveDashboardPetugas(request) {
   }
 
   var nama = requireString_(request.nama, 'nama', 150);
-  var wilayah = optionalString_(
-    request.wilayah_penugasan,
-    'wilayah_penugasan',
-    2000
+  var kodeKabupaten = requireString_(
+    request.kode_kabupaten || request.kode_kab,
+    'kode_kabupaten',
+    50
   );
+  var kabupaten = findKabupatenName_(kodeKabupaten);
   var aktif = normalizeBoolean_(
     request.aktif,
     'aktif',
@@ -2966,7 +3065,8 @@ function saveDashboardPetugas(request) {
         ? toText_(existing.id_petugas)
         : idPetugas,
       nama: nama,
-      wilayah_penugasan: wilayah,
+      kode_kabupaten: kodeKabupaten,
+      kabupaten: kabupaten,
       aktif: aktif
     };
     if (pin) {
@@ -2992,13 +3092,37 @@ function saveDashboardPetugas(request) {
       petugas: {
         id_petugas: fields.id_petugas,
         nama: fields.nama,
-        wilayah_penugasan: fields.wilayah_penugasan,
+        kode_kabupaten: fields.kode_kabupaten,
+        kode_kab: fields.kode_kabupaten,
+        kabupaten: fields.kabupaten,
         aktif: fields.aktif
       }
     };
   } finally {
     lock.releaseLock();
   }
+}
+
+function findKabupatenName_(kodeKabupaten) {
+  var normalizedCode = toText_(kodeKabupaten);
+  var foundName = '';
+
+  getMasterRecords_().some(function(master) {
+    if (master.kode_kab !== normalizedCode) {
+      return false;
+    }
+    foundName = master.kabupaten;
+    return true;
+  });
+
+  if (!foundName) {
+    throw new ApiError(
+      'KABUPATEN_TIDAK_DITEMUKAN',
+      'Kode kabupaten petugas tidak ditemukan pada master_wilayah.'
+    );
+  }
+
+  return foundName;
 }
 
 function writeDashboardFields_(sheet, rowNumber, headers, fields) {
@@ -3168,27 +3292,6 @@ function normalizeDashboardMasterInput_(raw) {
     );
   }
 
-  var latitude = optionalNumber_(raw.lat_centroid);
-  var longitude = optionalNumber_(raw.lon_centroid);
-  if (
-    latitude !== null &&
-    (latitude < -90 || latitude > 90)
-  ) {
-    throw new ApiError(
-      'LATITUDE_TIDAK_VALID',
-      'lat_centroid harus berada antara -90 dan 90.'
-    );
-  }
-  if (
-    longitude !== null &&
-    (longitude < -180 || longitude > 180)
-  ) {
-    throw new ApiError(
-      'LONGITUDE_TIDAK_VALID',
-      'lon_centroid harus berada antara -180 dan 180.'
-    );
-  }
-
   return {
     kode_kab: requireString_(
       raw.kode_kab,
@@ -3231,8 +3334,6 @@ function normalizeDashboardMasterInput_(raw) {
       200
     ),
     target_responden: target,
-    lat_centroid: latitude === null ? '' : latitude,
-    lon_centroid: longitude === null ? '' : longitude,
     versi_master: 0
   };
 }
@@ -3386,7 +3487,7 @@ function buildPetugasReportDataset_(options) {
     masterBySls[master.kode_sls] = master;
     if (
       matchesDashboardRegion_(master, options) &&
-      isAssignmentAllowed_(master.kode_sls, worker)
+      isWorkerInCounty_(master, worker)
     ) {
       scopeMaster.push(master);
     }
@@ -3414,7 +3515,7 @@ function buildPetugasReportDataset_(options) {
     if (!matchesDashboardRegion_(master || row, options)) {
       return;
     }
-    if (master && !isAssignmentAllowed_(kodeSls, worker)) {
+    if (master && !isWorkerInCounty_(master, worker)) {
       return;
     }
 
@@ -3536,8 +3637,14 @@ function buildPetugasReportDataset_(options) {
     }
   });
 
+  objectValues_(byKabupaten).forEach(function(aggregate) {
+    aggregate.target = worker.aktif
+      ? CONFIG.TARGET_PER_PETUGAS
+      : 0;
+  });
+
   var summary = {
-    target: sumDashboardField_(scopeMaster, 'target_responden'),
+    target: worker.aktif ? CONFIG.TARGET_PER_PETUGAS : 0,
     terdata: records.length,
     jumlah_record: records.length,
     lengkap: countDashboardStatus_(records, 'LENGKAP'),
@@ -3632,7 +3739,8 @@ function buildPetugasReportDocument_(
     ['IDENTITAS PETUGAS', 'NILAI'],
     ['Kode petugas', dataset.worker.id_petugas],
     ['Nama petugas', dataset.worker.nama || '-'],
-    ['Wilayah penugasan', dataset.worker.wilayah_penugasan || 'Semua wilayah'],
+    ['Kode kabupaten', dataset.worker.kode_kabupaten || '-'],
+    ['Kabupaten', dataset.worker.kabupaten || '-'],
     ['Periode', reportPeriodLabel_(options)]
   ]);
   styleReportTable_(workerTable);

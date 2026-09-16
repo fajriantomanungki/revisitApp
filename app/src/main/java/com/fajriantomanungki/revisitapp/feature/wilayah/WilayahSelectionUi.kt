@@ -60,6 +60,7 @@ private data class WilayahOption(
 fun CascadingWilayahSelector(
     wilayah: List<WilayahEntity>,
     modifier: Modifier = Modifier,
+    fixedKodeKabupaten: String? = null,
     initialSelection: WilayahSelection = WilayahSelection(),
     onSelectionChanged: (WilayahSelection) -> Unit
 ) {
@@ -82,36 +83,45 @@ fun CascadingWilayahSelector(
     var querySls by rememberSaveable { mutableStateOf("") }
 
     LaunchedEffect(
+        fixedKodeKabupaten,
         initialSelection.kabupaten?.kodeKab,
         initialSelection.kecamatan?.kodeKec,
         initialSelection.desa?.kodeDesa,
         initialSelection.sls?.kodeSls
     ) {
-        selectedKodeKab = initialSelection.kabupaten?.kodeKab
+        selectedKodeKab = fixedKodeKabupaten
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: initialSelection.kabupaten?.kodeKab
         selectedKodeKec = initialSelection.kecamatan?.kodeKec
         selectedKodeDesa = initialSelection.desa?.kodeDesa
         selectedKodeSls = initialSelection.sls?.kodeSls
     }
 
-    val hasKabupaten = remember(wilayah) {
-        wilayah.any { it.kodeKab.isNotBlank() }
+    val hasKabupaten = remember(wilayah, fixedKodeKabupaten) {
+        !fixedKodeKabupaten.isNullOrBlank() || wilayah.any { it.kodeKab.isNotBlank() }
     }
+
+    val effectiveKodeKab = fixedKodeKabupaten
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+        ?: selectedKodeKab
 
     val selectedKabupaten = remember(
         wilayah,
-        selectedKodeKab
+        effectiveKodeKab
     ) {
-        wilayah.firstOrNull { it.kodeKab == selectedKodeKab }
+        wilayah.firstOrNull { it.kodeKab == effectiveKodeKab }
     }
 
     val selectedKecamatan = remember(
         wilayah,
         hasKabupaten,
-        selectedKodeKab,
+        effectiveKodeKab,
         selectedKodeKec
     ) {
         wilayah.firstOrNull {
-            (!hasKabupaten || it.kodeKab == selectedKodeKab) &&
+            (!hasKabupaten || it.kodeKab == effectiveKodeKab) &&
                 it.kodeKec == selectedKodeKec
         }
     }
@@ -119,12 +129,12 @@ fun CascadingWilayahSelector(
     val selectedDesa = remember(
         wilayah,
         hasKabupaten,
-        selectedKodeKab,
+        effectiveKodeKab,
         selectedKodeKec,
         selectedKodeDesa
     ) {
         wilayah.firstOrNull {
-            (!hasKabupaten || it.kodeKab == selectedKodeKab) &&
+            (!hasKabupaten || it.kodeKab == effectiveKodeKab) &&
                 it.kodeKec == selectedKodeKec &&
                 it.kodeDesa == selectedKodeDesa
         }
@@ -133,13 +143,13 @@ fun CascadingWilayahSelector(
     val selectedSls = remember(
         wilayah,
         hasKabupaten,
-        selectedKodeKab,
+        effectiveKodeKab,
         selectedKodeKec,
         selectedKodeDesa,
         selectedKodeSls
     ) {
         wilayah.firstOrNull {
-            (!hasKabupaten || it.kodeKab == selectedKodeKab) &&
+            (!hasKabupaten || it.kodeKab == effectiveKodeKab) &&
                 it.kodeKec == selectedKodeKec &&
                 it.kodeDesa == selectedKodeDesa &&
                 it.kodeSls == selectedKodeSls
@@ -151,9 +161,20 @@ fun CascadingWilayahSelector(
      * dibersihkan. Saat list masih kosong, pilihan awal tidak dibersihkan
      * karena Room mungkin masih dalam proses memuat cache.
      */
-    LaunchedEffect(wilayah) {
+    LaunchedEffect(
+        wilayah,
+        fixedKodeKabupaten,
+        selectedKodeKab,
+        selectedKodeKec,
+        selectedKodeDesa,
+        selectedKodeSls
+    ) {
         if (wilayah.isNotEmpty()) {
-            if (hasKabupaten && selectedKodeKab != null && selectedKabupaten == null) {
+            if (fixedKodeKabupaten.isNullOrBlank() &&
+                hasKabupaten &&
+                selectedKodeKab != null &&
+                selectedKabupaten == null
+            ) {
                 selectedKodeKab = null
                 selectedKodeKec = null
                 selectedKodeDesa = null
@@ -175,6 +196,7 @@ fun CascadingWilayahSelector(
     LaunchedEffect(
         wilayah,
         hasKabupaten,
+        fixedKodeKabupaten,
         selectedKodeKab,
         selectedKodeKec,
         selectedKodeDesa,
@@ -207,13 +229,13 @@ fun CascadingWilayahSelector(
     val kecamatanOptions = remember(
         wilayah,
         hasKabupaten,
-        selectedKodeKab,
+        effectiveKodeKab,
         queryKec
     ) {
         wilayah
             .distinctBy { it.kodeKec }
             .filter {
-                (!hasKabupaten || it.kodeKab == selectedKodeKab) &&
+                (!hasKabupaten || it.kodeKab == effectiveKodeKab) &&
                     (it.kodeKec.contains(queryKec, ignoreCase = true) ||
                         it.namaKec.contains(queryKec, ignoreCase = true))
             }
@@ -224,13 +246,13 @@ fun CascadingWilayahSelector(
     val desaOptions = remember(
         wilayah,
         hasKabupaten,
-        selectedKodeKab,
+        effectiveKodeKab,
         selectedKodeKec,
         queryDesa
     ) {
         wilayah
             .filter {
-                (!hasKabupaten || it.kodeKab == selectedKodeKab) &&
+                (!hasKabupaten || it.kodeKab == effectiveKodeKab) &&
                     it.kodeKec == selectedKodeKec
             }
             .distinctBy { it.kodeDesa }
@@ -245,14 +267,14 @@ fun CascadingWilayahSelector(
     val slsOptions = remember(
         wilayah,
         hasKabupaten,
-        selectedKodeKab,
+        effectiveKodeKab,
         selectedKodeKec,
         selectedKodeDesa,
         querySls
     ) {
         wilayah
             .filter {
-                (!hasKabupaten || it.kodeKab == selectedKodeKab) &&
+                (!hasKabupaten || it.kodeKab == effectiveKodeKab) &&
                     it.kodeKec == selectedKodeKec &&
                     it.kodeDesa == selectedKodeDesa
             }
@@ -268,7 +290,7 @@ fun CascadingWilayahSelector(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        if (hasKabupaten) {
+        if (hasKabupaten && fixedKodeKabupaten.isNullOrBlank()) {
             WilayahDropdown(
                 label = "Kode Kabupaten",
                 selectedCode = selectedKodeKab,
@@ -288,8 +310,22 @@ fun CascadingWilayahSelector(
                 }
             )
 
+        }
+
+        if (hasKabupaten) {
+            if (!fixedKodeKabupaten.isNullOrBlank()) {
+                ReadOnlyRegionNameField(
+                    label = "Kode Kabupaten Petugas",
+                    value = effectiveKodeKab.orEmpty(),
+                    enabled = effectiveKodeKab != null
+                )
+            }
             ReadOnlyRegionNameField(
-                label = "Nama Kabupaten",
+                label = if (fixedKodeKabupaten.isNullOrBlank()) {
+                    "Nama Kabupaten"
+                } else {
+                    "Kabupaten Petugas"
+                },
                 value = selectedKabupaten?.kabupaten.orEmpty(),
                 enabled = selectedKabupaten != null
             )

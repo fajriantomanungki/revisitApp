@@ -50,8 +50,6 @@ class MasterWilayahRepository @Inject constructor(
                 kodeSls = row.kodeSls,
                 namaSls = row.namaSls,
                 targetResponden = row.targetResponden,
-                latCentroid = row.latCentroid,
-                lonCentroid = row.lonCentroid,
                 versiMaster = maxOf(row.version, response.version)
             )
         }

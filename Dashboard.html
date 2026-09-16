@@ -756,7 +756,7 @@
             <h1 id="page-title">Monitoring Progress</h1>
             <p class="page-description" id="page-description">
               Pantau cakupan pendataan yang sudah tersinkron dari aplikasi mobile
-              menurut kabupaten, kecamatan, SLS, dan petugas.
+              menurut kabupaten, kecamatan, dan petugas.
             </p>
           </div>
           <div class="loading" id="global-loading">
@@ -848,7 +848,7 @@
             <div class="table-head">
               <div>
                 <h2>Progress Berdasarkan Petugas</h2>
-                <p>Target petugas mengikuti wilayah penugasan pada sheet petugas/penugasan.</p>
+                <p>Setiap petugas memiliki target 126 responden (14 SLS × 9 responden).</p>
               </div>
               <span class="stat-note">Data offline muncul setelah sinkronisasi</span>
             </div>
@@ -976,8 +976,10 @@
                   <input id="petugas-pin" type="password" maxlength="100" placeholder="Wajib untuk petugas baru">
                 </div>
                 <div class="field">
-                  <label for="petugas-wilayah">Wilayah penugasan</label>
-                  <input id="petugas-wilayah" maxlength="2000" placeholder="Kode SLS/kecamatan, pisahkan dengan koma">
+                  <label for="petugas-kabupaten">Kabupaten asal *</label>
+                  <select id="petugas-kabupaten" required>
+                    <option value="">Pilih kabupaten</option>
+                  </select>
                 </div>
                 <label class="checkbox-field">
                   <input id="petugas-aktif" type="checkbox" checked>
@@ -1004,7 +1006,7 @@
                   <tr>
                     <th>Kode</th>
                     <th>Nama</th>
-                    <th>Penugasan</th>
+                    <th>Kabupaten</th>
                     <th>Status</th>
                     <th>Aksi</th>
                   </tr>
@@ -1026,7 +1028,7 @@
             </div>
             <div class="field" style="padding:0 18px">
               <label for="master-csv">CSV/TSV dengan header berikut</label>
-              <textarea id="master-csv" spellcheck="false">kode_kab,kabupaten,kode_kec,nama_kec,kode_desa,nama_desa,kode_sls,nama_sls,target_responden,lat_centroid,lon_centroid,versi_master</textarea>
+              <textarea id="master-csv" spellcheck="false">kode_kab,kabupaten,kode_kec,nama_kec,kode_desa,nama_desa,kode_sls,nama_sls,target_responden,versi_master</textarea>
             </div>
             <p class="help" style="padding:0 18px">
               Wajib mempertahankan kode wilayah sebagai teks agar angka nol di depan tidak hilang.
@@ -1094,12 +1096,12 @@
       }, 5000);
     }
 
-    function setOptions(selectId, items, valueKey, labelBuilder, includeAll) {
+    function setOptions(selectId, items, valueKey, labelBuilder, includeAll, emptyLabel) {
       var select = byId(selectId);
       var current = select.value;
       var prefix = includeAll
         ? '<option value="">Semua pilihan</option>'
-        : '<option value="">Pilih petugas</option>';
+        : '<option value="">' + escapeHtml(emptyLabel || 'Pilih petugas') + '</option>';
       var html = prefix;
 
       (items || []).forEach(function(item) {
@@ -1140,6 +1142,17 @@
             (item.kabupaten || '-');
         },
         true
+      );
+      setOptions(
+        'petugas-kabupaten',
+        kabupaten,
+        'kode_kab',
+        function(item) {
+          return (item.kode_kab ? item.kode_kab + ' · ' : '') +
+            (item.kabupaten || '-');
+        },
+        false,
+        'Pilih kabupaten'
       );
       populateKecamatanOptions('filter-kec', kecamatan, '');
       populateKecamatanOptions('report-kec', kecamatan, '');
@@ -1214,7 +1227,7 @@
     function renderSummary(summary) {
       summary = summary || {};
       var cards = [
-        ['Target responden', number(summary.target), 'Master wilayah terpilih'],
+        ['Target responden', number(summary.target), 'Petugas aktif × 126 (14 × 9)'],
         ['Sudah terdata', number(summary.terdata), 'Record tersinkron'],
         ['Cakupan', (Number(summary.persen_cakupan) || 0).toFixed(2).replace('.', ',') + '%', 'Rumus terdata ÷ target'],
         ['Data lengkap', number(summary.lengkap), 'Status pendataan'],
@@ -1348,7 +1361,10 @@
           return '<tr>' +
             '<td><strong>' + escapeHtml(worker.id_petugas) + '</strong></td>' +
             '<td>' + escapeHtml(worker.nama || '-') + '</td>' +
-            '<td class="muted">' + escapeHtml(worker.wilayah_penugasan || 'Semua wilayah') + '</td>' +
+            '<td class="muted">' + escapeHtml(
+              (worker.kode_kabupaten || '-') + ' · ' +
+              (worker.kabupaten || '-')
+            ) + '</td>' +
             '<td>' + (worker.aktif
               ? '<span class="pill active">Aktif</span>'
               : '<span class="pill inactive">Nonaktif</span>') + '</td>' +
@@ -1370,7 +1386,7 @@
       byId('petugas-id').value = worker.id_petugas;
       byId('petugas-nama').value = worker.nama || '';
       byId('petugas-pin').value = '';
-      byId('petugas-wilayah').value = worker.wilayah_penugasan || '';
+      byId('petugas-kabupaten').value = worker.kode_kabupaten || '';
       byId('petugas-aktif').checked = Boolean(worker.aktif);
       activateTab('petugas');
       byId('petugas-nama').focus();
@@ -1479,7 +1495,7 @@
           id_petugas: byId('petugas-id').value,
           nama: byId('petugas-nama').value,
           pin: byId('petugas-pin').value,
-          wilayah_penugasan: byId('petugas-wilayah').value,
+          kode_kabupaten: byId('petugas-kabupaten').value,
           aktif: byId('petugas-aktif').checked
         });
         showToast(
@@ -1560,7 +1576,7 @@
         panel.classList.toggle('active', panel.id === 'panel-' + tabName);
       });
       var titles = {
-        overview: ['Monitoring Progress', 'Pantau cakupan pendataan yang sudah tersinkron dari aplikasi mobile menurut kabupaten, kecamatan, SLS, dan petugas.'],
+        overview: ['Monitoring Progress', 'Pantau target dan realisasi pendataan yang sudah tersinkron menurut kabupaten, kecamatan, dan petugas.'],
         reports: ['Laporan PDF per Petugas', 'Buat laporan rapi berdasarkan petugas, wilayah, periode, serta foto watermark dari Google Drive.'],
         petugas: ['Manajemen Petugas', 'Tambah, perbarui, atau nonaktifkan akun petugas tanpa menghapus riwayat pendataan.'],
         master: ['Manajemen Master Wilayah', 'Import master Kabupaten–Kecamatan–Desa–SLS dengan validasi dan kenaikan versi otomatis.']

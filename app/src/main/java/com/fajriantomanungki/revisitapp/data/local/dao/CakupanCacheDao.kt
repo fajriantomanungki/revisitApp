@@ -22,20 +22,6 @@ abstract class CakupanCacheDao {
     @Query(
         """
         SELECT * FROM cakupan_cache
-        ORDER BY
-            CASE
-                WHEN target <= 0 THEN 0.0
-                ELSE CAST(jumlah_terdata AS REAL) / target
-            END ASC,
-            kode_sls ASC
-        LIMIT 10
-        """
-    )
-    abstract fun observeLowestTen(): Flow<List<CakupanCacheEntity>>
-
-    @Query(
-        """
-        SELECT * FROM cakupan_cache
         ORDER BY kode_sls ASC
         """
     )

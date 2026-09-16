@@ -56,6 +56,8 @@ class PendataanRepository @Inject constructor(
         val record = PendataanEntity(
             idRecord = idRecord,
             idPetugas = submission.idPetugas,
+            kodeKab = submission.wilayah?.kodeKab.orEmpty(),
+            kabupaten = submission.wilayah?.kabupaten.orEmpty(),
             kodeKec = submission.wilayah?.kodeKec.orEmpty(),
             namaKec = submission.wilayah?.namaKec.orEmpty(),
             kodeDesa = submission.wilayah?.kodeDesa.orEmpty(),

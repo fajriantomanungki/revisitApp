@@ -24,7 +24,9 @@ data class SyncServerConfig(
 
 data class CachedIdentity(
     val idPetugas: String,
-    val nama: String
+    val nama: String,
+    val kodeKabupaten: String,
+    val kabupaten: String
 )
 
 /**
@@ -79,12 +81,22 @@ class SyncConfigStore @Inject constructor(
         token: String,
         idPetugas: String,
         nama: String,
-        pin: String
+        pin: String,
+        kodeKabupaten: String,
+        kabupaten: String
     ) {
         require(pin.isNotBlank()) { "PIN tidak boleh kosong" }
+        require(kodeKabupaten.isNotBlank()) {
+            "kode_kabupaten tidak boleh kosong"
+        }
+        require(kabupaten.isNotBlank()) {
+            "kabupaten tidak boleh kosong"
+        }
         save(endpointUrl, token, idPetugas)
         preferences.edit()
             .putString(KEY_NAMA, nama.trim())
+            .putString(KEY_KODE_KABUPATEN, kodeKabupaten.trim())
+            .putString(KEY_KABUPATEN, kabupaten.trim())
             .putString(KEY_PIN_DIGEST, sha256(pin))
             .apply()
     }
@@ -125,7 +137,20 @@ class SyncConfigStore @Inject constructor(
             ?.takeIf { it.isNotEmpty() }
             ?: return null
         val nama = preferences.getString(KEY_NAMA, "")?.trim().orEmpty()
-        return CachedIdentity(idPetugas = idPetugas, nama = nama)
+        val kodeKabupaten = preferences
+            .getString(KEY_KODE_KABUPATEN, "")
+            ?.trim()
+            .orEmpty()
+        val kabupaten = preferences
+            .getString(KEY_KABUPATEN, "")
+            ?.trim()
+            .orEmpty()
+        return CachedIdentity(
+            idPetugas = idPetugas,
+            nama = nama,
+            kodeKabupaten = kodeKabupaten,
+            kabupaten = kabupaten
+        )
     }
 
     /** Memvalidasi sesi perangkat tanpa jaringan. */
@@ -164,6 +189,8 @@ class SyncConfigStore @Inject constructor(
         preferences.edit()
             .remove(KEY_ID_PETUGAS)
             .remove(KEY_NAMA)
+            .remove(KEY_KODE_KABUPATEN)
+            .remove(KEY_KABUPATEN)
             .remove(KEY_PIN_DIGEST)
             .apply()
     }
@@ -187,6 +214,8 @@ class SyncConfigStore @Inject constructor(
         const val KEY_TOKEN = "api_token"
         const val KEY_ID_PETUGAS = "id_petugas"
         const val KEY_NAMA = "nama_petugas"
+        const val KEY_KODE_KABUPATEN = "kode_kabupaten"
+        const val KEY_KABUPATEN = "kabupaten"
         const val KEY_PIN_DIGEST = "pin_digest"
     }
 }

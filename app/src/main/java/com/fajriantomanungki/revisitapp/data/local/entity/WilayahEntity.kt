@@ -47,12 +47,6 @@ data class WilayahEntity(
     @ColumnInfo(name = "target_responden")
     val targetResponden: Int = 0,
 
-    @ColumnInfo(name = "lat_centroid")
-    val latCentroid: Double? = null,
-
-    @ColumnInfo(name = "lon_centroid")
-    val lonCentroid: Double? = null,
-
     @ColumnInfo(name = "versi_master")
     val versiMaster: Int = 0
 )

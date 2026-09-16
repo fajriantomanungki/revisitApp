@@ -2,65 +2,76 @@
 
 Project Android Kotlin/Jetpack Compose dengan arsitektur offline-first:
 
-- Room/SQLite sebagai sumber kebenaran lokal.
-- WorkManager untuk antrean sinkronisasi.
-- Google Apps Script sebagai API HTTPS.
-- Google Spreadsheet untuk metadata dan Google Drive untuk foto.
+- Room/SQLite menjadi sumber kebenaran lokal.
+- WorkManager menangani antrean sinkronisasi batch.
+- Google Apps Script menjadi API HTTPS.
+- Google Spreadsheet menyimpan metadata dan Google Drive menyimpan foto.
 
 ## Menjalankan Android
 
-Buka folder repository ini sebagai project Android Studio. Atau gunakan Gradle
-8.9 dengan JDK 17:
-
-```bash
-gradle --no-daemon assembleDebug
-```
-
-Jika memakai Google Maps, isi `MAPS_API_KEY` melalui `local.properties` atau
-property Gradle. Jangan commit key asli.
-
-Konfigurasi endpoint Apps Script dan token API diatur satu kali pada file
-`local.properties` di root project. File ini diabaikan oleh Git:
+Buka folder repository sebagai project Android Studio. Gunakan Gradle JDK 17
+dan Android SDK 35. Konfigurasi endpoint serta token API satu kali pada
+`local.properties` di root project; file ini diabaikan Git:
 
 ```properties
 APPS_SCRIPT_URL=https://script.google.com/macros/s/DEPLOYMENT_ID/exec
 APPS_SCRIPT_TOKEN=ISI_TOKEN_API_APPS_SCRIPT_DI_SINI
-MAPS_API_KEY=ISI_GOOGLE_MAPS_KEY_DI_SINI
 ```
 
-Setelah konfigurasi tersebut tersedia dan aplikasi di-build ulang, layar login
-hanya meminta `id_petugas` dan PIN. URL serta token dimasukkan otomatis melalui
-`BuildConfig`, kemudian disimpan kembali secara terenkripsi melalui
-`SyncConfigStore`. Saat logout, hanya sesi petugas yang dihapus sehingga URL
-dan token tidak diminta lagi.
+Setelah build ulang, layar login hanya meminta `id_petugas` dan PIN. URL serta
+token diambil dari `BuildConfig`, kemudian disimpan terenkripsi oleh
+`SyncConfigStore`. Logout hanya menghapus sesi petugas.
 
-Token yang digunakan pada aplikasi mobile tetap dapat diekstrak dari APK oleh
-pihak yang memiliki APK. Untuk MVP internal, batasi token dan pantau aksesnya;
-untuk produksi, gunakan token sesi per petugas.
-
-Jalur form F-04 menyimpan record dan foto watermark ke Room/internal storage
-lebih dahulu. CameraX hanya menulis file sementara di `cacheDir`; file itu
-langsung diproses Canvas + EXIF lalu file aslinya dihapus. `SyncWorker` baru
-mengunggah foto watermark setelah record berstatus `SIAP_KIRIM`.
-
-Untuk login online, panggil action `login` dengan `id_petugas` dan PIN; setelah
-berhasil gunakan `SyncConfigStore.saveAuthenticated(...)`. PIN tidak disimpan,
-hanya digest SHA-256 terenkripsi untuk validasi login offline.
+Alur form menyimpan record dan foto watermark ke Room/internal storage lebih
+dahulu. `SyncWorker` mengunggah foto lalu metadata secara batch maksimal 20
+record ketika jaringan tersedia. PIN mentah tidak disimpan; login offline
+menggunakan digest SHA-256 terenkripsi.
 
 ## Menyiapkan Apps Script
 
-1. Buka `Code.gs` pada project Apps Script.
-2. Isi Script Properties:
-   `SPREADSHEET_ID`, `DRIVE_FOLDER_ID`, dan `API_TOKEN`.
-3. Jalankan `setupBackend()` satu kali.
-4. Isi sheet `petugas` dan `master_wilayah` sesuai header yang dibuat.
+1. Salin `Code.gs` dan `Dashboard.html` ke project Apps Script.
+2. Isi Script Properties: `SPREADSHEET_ID`, `DRIVE_FOLDER_ID`, dan `API_TOKEN`.
+3. Jalankan `setupBackend()` sekali.
+4. Isi `master_wilayah` dan `petugas` sesuai header di bawah.
 5. Deploy sebagai Web App dengan akses sesuai kebutuhan operasional.
+
+### Struktur petugas
+
+```text
+id_petugas,nama,hash_pin,kode_kabupaten,kabupaten,aktif
+```
+
+`hash_pin` adalah SHA-256 hex lowercase; gunakan fungsi `hashPin("PIN")` dari
+editor Apps Script. Setiap petugas aktif memiliki target 126 responden
+(`14 SLS × 9 responden`) dan boleh memilih wilayah mana pun di kabupatennya.
+Server menolak record yang berada di kabupaten lain.
+
+### Struktur master wilayah
+
+```text
+kode_kab,kabupaten,kode_kec,nama_kec,kode_desa,nama_desa,
+kode_sls,nama_sls,target_responden,versi_master
+```
+
+Simpan seluruh kode wilayah sebagai teks agar angka nol di depan tetap ada.
+`target_responden` masih dipakai untuk rekap kecamatan/SLS, sedangkan target
+operasional petugas tetap 126.
+
+### Migrasi dari versi lama
+
+Backup Spreadsheet terlebih dahulu, lalu jalankan `migrateBackendSchema()`
+satu kali. Fungsi ini menghapus kolom centroid, kolom assignment lama, dan
+sheet assignment legacy. Nilai `kode_kabupaten` serta `kabupaten` setiap
+petugas harus diisi manual melalui dashboard karena tidak dapat disimpulkan
+secara aman dari assignment lama.
+
+Database Room Android naik ke versi 3 melalui migration yang mempertahankan
+data lokal, menambahkan county pada `pendataan`, dan menghapus kolom centroid
+dari tabel `wilayah`.
 
 ## Dashboard web dan laporan PDF
 
-Dashboard web menggunakan Spreadsheet yang sama sebagai sumber data sehingga
-tidak membuat salinan data dan tidak mengubah kontrak API Android. File
-`Dashboard.html` disajikan melalui route baru:
+Dashboard memakai Spreadsheet yang sama:
 
 ```text
 https://script.google.com/macros/s/DEPLOYMENT_ID/exec?page=dashboard&admin_token=DASHBOARD_TOKEN
@@ -69,47 +80,15 @@ https://script.google.com/macros/s/DEPLOYMENT_ID/exec?page=dashboard&admin_token
 Tambahkan Script Properties berikut:
 
 ```text
-DASHBOARD_TOKEN  = token khusus dashboard, berbeda dari API_TOKEN
-ADMIN_EMAILS     = email admin yang boleh mengakses, pisahkan dengan koma
-REPORT_FOLDER_ID = ID folder Drive khusus PDF (opsional; jika kosong,
-                   laporan memakai DRIVE_FOLDER_ID)
+DASHBOARD_TOKEN = token dashboard, berbeda dari API_TOKEN
+ADMIN_EMAILS = email admin dipisahkan koma
+REPORT_FOLDER_ID = folder Drive laporan PDF (opsional)
 ```
 
-Setelah menambahkan `Dashboard.html` dan `Code.gs` ke Apps Script, deploy
-versi baru Web App. Menu dashboard menyediakan:
+Dashboard menampilkan target/realisasi per kabupaten, kecamatan, dan petugas;
+menyediakan manajemen petugas, import master, serta laporan PDF per petugas.
+Target kabupaten dihitung sebagai jumlah petugas aktif × 126. Laporan PDF
+hanya memuat record yang sudah masuk ke Spreadsheet.
 
-- monitoring progress per kabupaten, kecamatan, SLS, dan petugas;
-- input/perbarui petugas tanpa menyimpan PIN mentah;
-- import master wilayah dengan mode upsert berdasarkan `kode_sls`;
-- pembuatan PDF rapi per petugas berdasarkan periode dan wilayah;
-- lampiran foto watermark dari Google Drive secara opsional.
-
-Jalankan `setupBackend()` kembali setelah pembaruan kode. Fungsi ini hanya
-membuat sheet yang belum ada dan memeriksa header wajib. Sheet tambahan
-`penugasan` dapat digunakan untuk menyimpan:
-
-```text
-id_penugasan, id_petugas, kode_kab, kode_kec, kode_desa, kode_sls,
-aktif, keterangan, created_at, updated_at
-```
-
-Baris master lama tidak dihapus ketika import dari dashboard. Versi master
-akan dinaikkan otomatis agar perangkat Android mengetahui bahwa cache perlu
-diperbarui. PDF hanya memuat record yang sudah berhasil masuk ke sheet
-`pendataan`; data yang masih offline di perangkat belum dapat dilaporkan.
-
-Header `master_wilayah` wajib memuat hierarki berikut:
-
-```text
-kode_kab, kabupaten, kode_kec, nama_kec, kode_desa, nama_desa,
-kode_sls, nama_sls, target_responden, lat_centroid, lon_centroid, versi_master
-```
-
-Simpan seluruh kode wilayah sebagai teks agar angka nol di depan tidak hilang.
-Setelah menambah atau mengubah master, naikkan nilai `versi_master` agar
-perangkat yang sudah memiliki cache mengetahui bahwa master perlu diunduh ulang.
-Versi aplikasi yang sudah memiliki database Room lama akan melakukan migration
-otomatis untuk menambahkan kolom Kabupaten tanpa menghapus data lokal.
-
-Build Android di GitHub Actions dijalankan pada setiap push ke `main` dan pull
-request.
+Setelah memperbarui Apps Script, deploy versi Web App terbaru. Build Android
+di GitHub Actions dijalankan pada setiap push ke `main` dan pull request.
