@@ -6,8 +6,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
@@ -344,13 +344,12 @@ private fun WilayahDropdown(
                     enabled = false
                 )
             } else {
-                LazyColumn(
-                    modifier = Modifier.heightIn(max = 300.dp)
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 300.dp)
+                        .verticalScroll(rememberScrollState())
                 ) {
-                    items(
-                        items = options,
-                        key = { option -> option.code }
-                    ) { option ->
+                    options.forEach { option ->
                         DropdownMenuItem(
                             text = {
                                 Text(option.code + " — " + option.name)
