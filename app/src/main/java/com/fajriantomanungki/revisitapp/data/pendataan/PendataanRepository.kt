@@ -220,8 +220,15 @@ class PendataanRepository @Inject constructor(
             isMock = submission.isMock,
             waktuPendataan = submission.waktuPendataan,
             statusKirim = nextStatus,
+            /*
+             * Record GAGAL bisa saja sebenarnya sudah tersimpan di server
+             * ketika respons hilang. Tandai sebagai replace_existing agar
+             * edit/kirim ulang memperbarui UUID yang sama bila sudah ada,
+             * dan tetap menambah record bila belum ada.
+             */
             replaceExisting = existing.replaceExisting ||
-                editingSentRecord,
+                editingSentRecord ||
+                existing.statusKirim == SyncStatus.GAGAL,
             pesanError = null,
             percobaanKirim = if (nextStatus == SyncStatus.DRAFT) {
                 existing.percobaanKirim
