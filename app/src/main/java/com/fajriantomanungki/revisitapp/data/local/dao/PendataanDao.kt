@@ -147,8 +147,9 @@ interface PendataanDao {
 
     /**
      * DRAFT tidak dihitung sebagai cakupan karena belum tentu memiliki data
-     * lengkap. Record siap kirim, sedang mengirim, atau gagal kirim dihitung
-     * sebagai kontribusi lokal sementara.
+     * lengkap. Record siap/sedang dikirim dihitung selama belum menjadi
+     * pengganti record server. Record GAGAL tetap dihitung karena hasil
+     * request belum cukup untuk membuktikan apakah server sudah menyimpannya.
      */
     @Query(
         """
@@ -156,7 +157,10 @@ interface PendataanDao {
         FROM pendataan
         WHERE id_petugas = :idPetugas
           AND kode_sls != ''
-          AND replace_existing = 0
+          AND (
+              replace_existing = 0
+              OR status_kirim = 'GAGAL'
+          )
           AND status_kirim IN ('SIAP_KIRIM', 'MENGIRIM', 'GAGAL')
         GROUP BY kode_sls
         """
