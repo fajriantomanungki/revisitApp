@@ -1160,7 +1160,7 @@
             <div class="form-head">
               <div>
                 <h2>Daftarkan Admin</h2>
-                <p>Admin yang sedang login dapat menambahkan akun admin lain.</p>
+                <p>Admin baru otomatis dibatasi pada kabupaten yang sama dengan akun admin yang sedang login.</p>
               </div>
             </div>
             <form id="admin-form">
@@ -1215,13 +1215,16 @@
   <div class="toast" id="toast"></div>
 
   <script>
-    var INITIAL_TOKEN = <?!= dashboardTokenJson ?>;
+    /*
+     * Dashboard selalu dimulai dari halaman login. Token legacy tidak
+     * digunakan untuk melewati autentikasi admin.
+     */
     var state = {
-      token: INITIAL_TOKEN || '',
+      token: '',
       session: '',
       bootstrap: null,
       data: null,
-      authenticated: Boolean(INITIAL_TOKEN)
+      authenticated: false
     };
 
     function byId(id) {
