@@ -2,6 +2,7 @@
 
 package com.fajriantomanungki.revisitapp.feature.pendataan
 
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -45,6 +46,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -61,6 +63,7 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import com.fajriantomanungki.revisitapp.data.local.entity.WilayahEntity
 import com.fajriantomanungki.revisitapp.data.local.entity.PendataanEntity
+import com.fajriantomanungki.revisitapp.data.local.entity.FotoEntity
 import com.fajriantomanungki.revisitapp.data.local.model.JenisObjek
 import com.fajriantomanungki.revisitapp.data.local.model.StatusPendataan
 import com.fajriantomanungki.revisitapp.data.local.model.SyncStatus
@@ -80,8 +83,11 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Form satu halaman F-04. Semua jalur simpan berakhir di Room, bukan HTTP. */
 @Composable
@@ -92,6 +98,7 @@ fun PendataanFormScreen(
     locationHelper: LocationHelper,
     watermarkEngine: WatermarkEngine,
     existing: PendataanEntity? = null,
+    existingPhotos: List<FotoEntity> = emptyList(),
     onSave: suspend (PendataanFormSubmission) -> Result<Unit>,
     onSaved: () -> Unit,
     onBack: () -> Unit
@@ -148,7 +155,13 @@ fun PendataanFormScreen(
     var catatan by rememberSaveable(existing?.idRecord) {
         mutableStateOf(existing?.catatan.orEmpty())
     }
-    var photos by remember { mutableStateOf<List<File>>(emptyList()) }
+    var photoDrafts by remember(existing?.idRecord, existingPhotos) {
+        mutableStateOf(
+            existingPhotos
+                .sortedBy { it.urutan }
+                .map { PhotoDraft(existing = it) }
+        )
+    }
     var showCamera by rememberSaveable { mutableStateOf(false) }
     var showLocationRationale by rememberSaveable { mutableStateOf(false) }
     var showDiscardDialog by rememberSaveable { mutableStateOf(false) }
@@ -175,7 +188,17 @@ fun PendataanFormScreen(
         namaObjek.isNotBlank() &&
         (statusPendataan != StatusPendataan.TIDAK_LENGKAP ||
             catatan.isNotBlank()) &&
-        (photos.isNotEmpty() || existing != null)
+        photoDrafts.isNotEmpty()
+
+    val originalPhotoIds = remember(existing?.idRecord, existingPhotos) {
+        existingPhotos.map { it.idFoto }.toSet()
+    }
+    val photoSetChanged = if (existing == null) {
+        photoDrafts.isNotEmpty()
+    } else {
+        photoDrafts.mapNotNull { it.existing?.idFoto }.toSet() != originalPhotoIds ||
+            photoDrafts.any { it.file != null }
+    }
 
     fun makeSubmission(asDraft: Boolean): PendataanFormSubmission {
         val location = capturedLocation
@@ -190,9 +213,15 @@ fun PendataanFormScreen(
             latitude = location?.latitude,
             longitude = location?.longitude,
             accuracyM = location?.accuracyM,
-            isMock = locationAudit?.isMock == true || existing?.isMock == true,
+            isMock = locationAudit?.isMock ?: existing?.isMock ?: false,
             waktuPendataan = location?.capturedAtEpochMillis,
-            photoFiles = photos,
+            photoFiles = photoDrafts.mapNotNull { it.file },
+            retainedPhotoIds = if (photoSetChanged) {
+                photoDrafts.mapNotNull { it.existing?.idFoto }
+            } else {
+                emptyList()
+            },
+            replacePhotos = photoSetChanged,
             simpanSebagaiDraf = asDraft,
             versiApp = "0.1.0",
             existingRecordId = existing?.idRecord
@@ -211,7 +240,7 @@ fun PendataanFormScreen(
                 namaObjek = namaObjek,
                 statusPendataan = statusPendataan,
                 catatan = catatan,
-                photoCount = if (photos.isNotEmpty()) photos.size else if (existing != null) 1 else 0
+                photoCount = photoDrafts.size
             )
             return
         }
@@ -272,7 +301,9 @@ fun PendataanFormScreen(
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        if (permissions[android.Manifest.permission.ACCESS_FINE_LOCATION] == true) {
+        if (permissions[android.Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            permissions[android.Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        ) {
             coroutineScope.launch { captureLocation() }
         } else {
             errorMessage = "Izin lokasi diperlukan untuk merekam koordinat pendataan."
@@ -280,7 +311,7 @@ fun PendataanFormScreen(
     }
 
     fun requestLocation() {
-        if (locationHelper.hasFineLocationPermission()) {
+        if (locationHelper.hasLocationPermission()) {
             coroutineScope.launch { captureLocation() }
         } else {
             showLocationRationale = true
@@ -296,7 +327,7 @@ fun PendataanFormScreen(
             errorMessage = "Pilih SLS dan ambil lokasi sebelum mengambil gambar."
             return
         }
-        if (photos.size >= MAX_PHOTOS) {
+        if (photoDrafts.size >= MAX_PHOTOS) {
             rawFile.delete()
             errorMessage = "Maksimal tiga foto per pendataan."
             return
@@ -304,12 +335,9 @@ fun PendataanFormScreen(
 
         isProcessingPhoto = true
         coroutineScope.launch {
-            val source = BitmapFactory.decodeFile(rawFile.absolutePath)
             val result: Result<WatermarkedPhoto> = try {
-                val bitmap = source
-                    ?: throw IllegalStateException("File foto tidak dapat dibaca")
                 watermarkEngine.renderAndSave(
-                    source = bitmap,
+                    sourceFile = rawFile,
                     data = WatermarkData(
                         latitude = location.latitude,
                         longitude = location.longitude,
@@ -320,20 +348,21 @@ fun PendataanFormScreen(
                         namaKec = selectedSls.namaKec,
                         timestampEpochMillis = location.capturedAtEpochMillis
                     ),
-                    outputName = "${System.currentTimeMillis()}_${photos.size + 1}.jpg"
+                    outputName = "${System.currentTimeMillis()}_${photoDrafts.size + 1}.jpg"
                 )
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (error: Throwable) {
                 Result.failure(error)
             } finally {
-                source?.takeIf { !it.isRecycled }?.recycle()
                 rawFile.delete()
             }
 
             isProcessingPhoto = false
             result.fold(
-                onSuccess = { photo -> photos = photos + photo.file },
+                onSuccess = { photo ->
+                    photoDrafts = photoDrafts + PhotoDraft(file = photo.file)
+                },
                 onFailure = { error ->
                     errorMessage = error.message
                         ?: "Gagal memproses watermark foto."
@@ -348,7 +377,7 @@ fun PendataanFormScreen(
             alamat.isNotBlank() ||
             catatan.isNotBlank() ||
             capturedLocation != null ||
-            photos.isNotEmpty()
+            photoSetChanged
         if (hasChanges && !isSaving) {
             showDiscardDialog = true
         } else if (!isSaving) {
@@ -408,7 +437,10 @@ fun PendataanFormScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        photos.forEach { it.delete() }
+                        photoDrafts
+                            .filter { it.existing == null }
+                            .mapNotNull { it.file }
+                            .forEach { it.delete() }
                         showDiscardDialog = false
                         onBack()
                     }
@@ -609,7 +641,7 @@ fun PendataanFormScreen(
                 subtitle = "Setiap foto akan diberi watermark koordinat dan waktu."
             )
             Text(
-                text = "${photos.size}/$MAX_PHOTOS foto watermark tersimpan di penyimpanan privat aplikasi.",
+                text = "${photoDrafts.size}/$MAX_PHOTOS foto watermark tersimpan di penyimpanan privat aplikasi.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -619,13 +651,15 @@ fun PendataanFormScreen(
                     .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                photos.forEachIndexed { index, file ->
+                photoDrafts.forEachIndexed { index, draft ->
                     PhotoPreview(
-                        file = file,
+                        draft = draft,
                         index = index,
                         onDelete = {
-                            file.delete()
-                            photos = photos.filterIndexed { photoIndex, _ -> photoIndex != index }
+                            draft.file?.delete()
+                            photoDrafts = photoDrafts.filterIndexed {
+                                    photoIndex, _ -> photoIndex != index
+                            }
                         },
                         enabled = !isSaving && !isProcessingPhoto
                     )
@@ -635,7 +669,7 @@ fun PendataanFormScreen(
                 onClick = { showCamera = true },
                 enabled = selection.sls != null &&
                     capturedLocation != null &&
-                    photos.size < MAX_PHOTOS &&
+                    photoDrafts.size < MAX_PHOTOS &&
                     !isSaving &&
                     !isProcessingPhoto,
                 shape = MaterialTheme.shapes.medium,
@@ -869,14 +903,31 @@ private fun FormChoiceDropdown(
 
 @Composable
 private fun PhotoPreview(
-    file: File,
+    draft: PhotoDraft,
     index: Int,
     onDelete: () -> Unit,
     enabled: Boolean
 ) {
-    val bitmap = remember(file.absolutePath) {
-        BitmapFactory.decodeFile(file.absolutePath)
+    val previewFile = remember(draft) {
+        draft.file ?: draft.existing?.pathLokal
+            ?.takeIf { it.isNotBlank() }
+            ?.let(::File)
     }
+    val bitmap by produceState<Bitmap?>(
+        initialValue = null,
+        key1 = previewFile?.absolutePath
+    ) {
+        val decoded = withContext(Dispatchers.IO) {
+            previewFile?.let(::decodePreviewBitmap)
+        }
+        value = decoded
+        try {
+            awaitCancellation()
+        } finally {
+            decoded?.takeIf { !it.isRecycled }?.recycle()
+        }
+    }
+    val previewBitmap = bitmap
     Card(
         modifier = Modifier.width(104.dp),
         shape = MaterialTheme.shapes.medium,
@@ -889,9 +940,9 @@ private fun PhotoPreview(
             modifier = Modifier.padding(4.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            if (bitmap != null) {
+            if (previewBitmap != null) {
                 Image(
-                    bitmap = bitmap.asImageBitmap(),
+                    bitmap = previewBitmap.asImageBitmap(),
                     contentDescription = "Pratinjau foto ${index + 1}",
                     modifier = Modifier
                         .size(94.dp)
@@ -904,7 +955,13 @@ private fun PhotoPreview(
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("Foto")
+                    Text(
+                        if (draft.existing?.driveFileId.isNullOrBlank()) {
+                            "Foto"
+                        } else {
+                            "Tersimpan\ndi Drive"
+                        }
+                    )
                 }
             }
             TextButton(onClick = onDelete, enabled = enabled) {
@@ -912,6 +969,32 @@ private fun PhotoPreview(
             }
         }
     }
+}
+
+private data class PhotoDraft(
+    val existing: FotoEntity? = null,
+    val file: File? = null
+)
+
+private fun decodePreviewBitmap(file: File): Bitmap? {
+    if (!file.isFile) return null
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(file.absolutePath, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+
+    val options = BitmapFactory.Options().apply {
+        inSampleSize = calculatePreviewSampleSize(bounds.outWidth, bounds.outHeight)
+        inPreferredConfig = Bitmap.Config.RGB_565
+    }
+    return BitmapFactory.decodeFile(file.absolutePath, options)
+}
+
+private fun calculatePreviewSampleSize(width: Int, height: Int): Int {
+    var sample = 1
+    while (width / sample > 512 || height / sample > 512) {
+        sample *= 2
+    }
+    return sample
 }
 
 private fun validationMessage(

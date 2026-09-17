@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -15,12 +16,14 @@ import com.fajriantomanungki.revisitapp.data.dashboard.DashboardCoverageReposito
 import com.fajriantomanungki.revisitapp.data.local.dao.PendataanDao
 import com.fajriantomanungki.revisitapp.data.local.dao.WilayahDao
 import com.fajriantomanungki.revisitapp.data.local.dao.CakupanCacheDao
+import com.fajriantomanungki.revisitapp.data.local.dao.FotoDao
 import com.fajriantomanungki.revisitapp.data.local.dao.LaporanKegiatanDao
 import com.fajriantomanungki.revisitapp.data.master.MasterWilayahRepository
 import com.fajriantomanungki.revisitapp.data.dashboard.CakupanSyncRepository
 import com.fajriantomanungki.revisitapp.data.pendataan.PendataanRepository
 import com.fajriantomanungki.revisitapp.data.laporan.LaporanKegiatanRepository
 import com.fajriantomanungki.revisitapp.data.sync.AppsScriptApi
+import com.fajriantomanungki.revisitapp.data.sync.AppsScriptApiException
 import com.fajriantomanungki.revisitapp.data.sync.NetworkStatus
 import com.fajriantomanungki.revisitapp.data.sync.SyncConfigStore
 import com.fajriantomanungki.revisitapp.data.sync.SyncConfig
@@ -33,6 +36,7 @@ import com.fajriantomanungki.revisitapp.ui.theme.RevisitAppTheme
 import com.fajriantomanungki.revisitapp.worker.PhotoRetentionScheduler
 import com.fajriantomanungki.revisitapp.worker.SyncWorkScheduler
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -44,6 +48,9 @@ class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var pendataanDao: PendataanDao
+
+    @Inject
+    lateinit var fotoDao: FotoDao
 
     @Inject
     lateinit var laporanKegiatanDao: LaporanKegiatanDao
@@ -105,7 +112,32 @@ class MainActivity : ComponentActivity() {
                 if (activeConfig == null || cachedIdentity?.kodeKabupaten.isNullOrBlank()) {
                     LoginScreen { credentials ->
                         val serverConfig = syncConfigStore.readServerConfig()
-                        if (serverConfig == null) {
+                        val cached = syncConfigStore.readCachedIdentity()
+                        val canUseOfflineSession =
+                            syncConfigStore.canLoginOffline(
+                                idPetugas = credentials.idPetugas,
+                                pin = credentials.pin
+                            ) &&
+                                cached?.kodeKabupaten?.isNotBlank() == true &&
+                                cached?.kabupaten?.isNotBlank() == true &&
+                                syncConfigStore.read() != null
+
+                        if (!NetworkStatus.isConnected(this@MainActivity)) {
+                            if (!canUseOfflineSession) {
+                                Result.failure<String>(
+                                    IllegalStateException(
+                                        "Login offline belum tersedia untuk petugas ini. " +
+                                            "Login online satu kali terlebih dahulu."
+                                    )
+                                )
+                            } else {
+                                activeConfig = syncConfigStore.read()
+                                    ?: error("Sesi offline tidak dapat dipulihkan")
+                                Result.success(
+                                    "Login offline berhasil${cached?.nama?.takeIf { it.isNotBlank() }?.let { ", $it" }.orEmpty()}."
+                                )
+                            }
+                        } else if (serverConfig == null) {
                             Result.failure<String>(
                                 IllegalStateException(
                                     "Konfigurasi server belum tersedia. Tambahkan " +
@@ -119,7 +151,7 @@ class MainActivity : ComponentActivity() {
                                 token = serverConfig.token,
                                 idPetugas = credentials.idPetugas
                             )
-                            runCatching {
+                            try {
                                 val response = appsScriptApi.login(
                                     config = config,
                                     idPetugas = credentials.idPetugas,
@@ -136,7 +168,23 @@ class MainActivity : ComponentActivity() {
                                 )
                                 activeConfig = syncConfigStore.read()
                                     ?: error("Sesi berhasil tetapi gagal disimpan")
-                                "Login berhasil${response.nama.takeIf { it.isNotBlank() }?.let { ", $it" }.orEmpty()}."
+                                Result.success(
+                                    "Login berhasil${response.nama.takeIf { it.isNotBlank() }?.let { ", $it" }.orEmpty()}."
+                                )
+                            } catch (cancellation: CancellationException) {
+                                throw cancellation
+                            } catch (error: Throwable) {
+                                if (canUseOfflineSession && isOfflineFallback(error)) {
+                                    activeConfig = syncConfigStore.read()
+                                        ?: throw IllegalStateException(
+                                            "Sesi offline tidak dapat dipulihkan"
+                                        )
+                                    Result.success(
+                                        "Server tidak dapat dihubungi. Login offline berhasil${cached?.nama?.takeIf { it.isNotBlank() }?.let { ", $it" }.orEmpty()}."
+                                    )
+                                } else {
+                                    Result.failure(error)
+                                }
                             }
                         }
                     }
@@ -163,6 +211,41 @@ class MainActivity : ComponentActivity() {
                     var isCoverageRefreshing by rememberSaveable { mutableStateOf(false) }
                     var message by rememberSaveable { mutableStateOf<String?>(null) }
 
+                    LaunchedEffect(idPetugas) {
+                        if (!NetworkStatus.isConnected(this@MainActivity)) return@LaunchedEffect
+
+                        isMasterRefreshing = true
+                        val masterFailure = try {
+                            masterWilayahRepository.refresh()
+                            null
+                        } catch (cancellation: CancellationException) {
+                            throw cancellation
+                        } catch (error: Throwable) {
+                            error
+                        }
+                        isMasterRefreshing = false
+
+                        isCoverageRefreshing = true
+                        val coverageFailure = try {
+                            cakupanSyncRepository.refresh()
+                            null
+                        } catch (cancellation: CancellationException) {
+                            throw cancellation
+                        } catch (error: Throwable) {
+                            error
+                        }
+                        isCoverageRefreshing = false
+
+                        val failures = listOfNotNull(
+                            masterFailure?.message,
+                            coverageFailure?.message
+                        )
+                        if (failures.isNotEmpty()) {
+                            message = "Sinkronisasi awal belum lengkap: " +
+                                failures.joinToString("; ")
+                        }
+                    }
+
                     RevisitAppShell(
                         idPetugas = idPetugas,
                         kodeKabupaten = identity.kodeKabupaten,
@@ -180,33 +263,36 @@ class MainActivity : ComponentActivity() {
                         onRefreshMaster = {
                             coroutineScope.launch {
                                 isMasterRefreshing = true
-                                message = runCatching {
-                                    masterWilayahRepository.refresh()
-                                }.fold(
-                                    onSuccess = { result ->
-                                        "Master wilayah diperbarui: ${result.rowCount} SLS, versi ${result.version}."
-                                    },
-                                    onFailure = { error ->
+                                try {
+                                    message = try {
+                                        val result = masterWilayahRepository.refresh()
+                                        "Master wilayah diperbarui: ${result.rowCount} SLS, " +
+                                            "versi ${result.version}."
+                                    } catch (cancellation: CancellationException) {
+                                        throw cancellation
+                                    } catch (error: Throwable) {
                                         error.message ?: "Gagal memperbarui master wilayah."
                                     }
-                                )
-                                isMasterRefreshing = false
+                                } finally {
+                                    isMasterRefreshing = false
+                                }
                             }
                         },
                         onRefreshCoverage = {
                             coroutineScope.launch {
                                 isCoverageRefreshing = true
-                                message = runCatching {
-                                    cakupanSyncRepository.refresh()
-                                }.fold(
-                                    onSuccess = { result ->
+                                try {
+                                    message = try {
+                                        val result = cakupanSyncRepository.refresh()
                                         "Cakupan diperbarui: ${result.rowCount} SLS."
-                                    },
-                                    onFailure = { error ->
+                                    } catch (cancellation: CancellationException) {
+                                        throw cancellation
+                                    } catch (error: Throwable) {
                                         error.message ?: "Gagal memperbarui cakupan."
                                     }
-                                )
-                                isCoverageRefreshing = false
+                                } finally {
+                                    isCoverageRefreshing = false
+                                }
                             }
                         },
                         onSend = {
@@ -221,21 +307,32 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         onSavePendataan = { submission ->
-                            runCatching {
+                            try {
                                 pendataanRepository.save(submission)
-                                Unit
+                                Result.success(Unit)
+                            } catch (cancellation: CancellationException) {
+                                throw cancellation
+                            } catch (error: Throwable) {
+                                Result.failure(error)
                             }
                         },
                         onSaveLaporanKegiatan = { tanggal, rangkuman, siapKirim ->
-                            runCatching {
+                            try {
                                 laporanKegiatanRepository.save(
                                     idPetugas = idPetugas,
                                     tanggal = tanggal,
                                     rangkuman = rangkuman,
                                     siapKirim = siapKirim
                                 )
-                                Unit
+                                Result.success(Unit)
+                            } catch (cancellation: CancellationException) {
+                                throw cancellation
+                            } catch (error: Throwable) {
+                                Result.failure(error)
                             }
+                        },
+                        onLoadPhotos = { idRecord ->
+                            fotoDao.getByRecord(idRecord)
                         },
                         onLogout = {
                             logoutGuard.logoutIfAllowed(idPetugas) {
@@ -252,4 +349,12 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+}
+
+private fun isOfflineFallback(error: Throwable): Boolean {
+    val apiError = error as? AppsScriptApiException ?: return false
+    return apiError.errorCode == "NETWORK_ERROR" ||
+        apiError.httpCode == 408 ||
+        apiError.httpCode == 429 ||
+        apiError.httpCode?.let { it >= 500 } == true
 }

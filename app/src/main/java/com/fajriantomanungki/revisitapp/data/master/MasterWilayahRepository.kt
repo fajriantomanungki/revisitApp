@@ -53,11 +53,10 @@ class MasterWilayahRepository @Inject constructor(
                 versiMaster = maxOf(row.version, response.version)
             )
         }
-        if (response.version > localVersion && rows.isEmpty()) {
+        if (rows.isEmpty()) {
             error(
-                "Respons master wilayah tidak valid: versi server " +
-                    "lebih baru tetapi tidak berisi data. Cache lokal " +
-                    "dipertahankan."
+                "Respons master wilayah tidak valid: server menyatakan ada " +
+                    "perubahan tetapi tidak berisi data. Cache lokal dipertahankan."
             )
         }
         wilayahDao.replaceAll(rows)

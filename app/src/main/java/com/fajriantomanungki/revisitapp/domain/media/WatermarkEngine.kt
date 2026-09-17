@@ -2,8 +2,10 @@ package com.fajriantomanungki.revisitapp.domain.media
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Typeface
 import androidx.exifinterface.media.ExifInterface
@@ -63,6 +65,36 @@ class WatermarkEngine @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
 
+    /**
+     * Membaca foto kamera secara hemat memori, membetulkan orientasi EXIF,
+     * kemudian meneruskan bitmap tegak ke engine watermark.
+     */
+    suspend fun renderAndSave(
+        sourceFile: File,
+        data: WatermarkData,
+        outputName: String = UUID.randomUUID().toString() + ".jpg"
+    ): Result<WatermarkedPhoto> {
+        val source = try {
+            withContext(Dispatchers.IO) {
+                decodeUpright(sourceFile)
+            }
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Throwable) {
+            return Result.failure(error)
+        }
+
+        return try {
+            renderAndSave(
+                source = source,
+                data = data,
+                outputName = outputName
+            )
+        } finally {
+            if (!source.isRecycled) source.recycle()
+        }
+    }
+
     suspend fun renderAndSave(
         source: Bitmap,
         data: WatermarkData,
@@ -121,6 +153,95 @@ class WatermarkEngine @Inject constructor(
             throw cancellation
         } catch (error: Throwable) {
             Result.failure(error)
+        }
+    }
+
+    private fun decodeUpright(sourceFile: File): Bitmap {
+        require(sourceFile.isFile) {
+            "File foto tidak ditemukan: ${sourceFile.absolutePath}"
+        }
+
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(sourceFile.absolutePath, bounds)
+        require(bounds.outWidth > 0 && bounds.outHeight > 0) {
+            "File foto tidak dapat dibaca"
+        }
+
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = calculateDecodeSampleSize(bounds.outWidth, bounds.outHeight)
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        val decoded = BitmapFactory.decodeFile(sourceFile.absolutePath, options)
+            ?: error("File foto tidak dapat didekode")
+
+        val orientation = ExifInterface(sourceFile.absolutePath).getAttributeInt(
+            ExifInterface.TAG_ORIENTATION,
+            ExifInterface.ORIENTATION_NORMAL
+        )
+        val matrix = orientationMatrix(orientation)
+            ?: return decoded
+
+        return try {
+            Bitmap.createBitmap(
+                decoded,
+                0,
+                0,
+                decoded.width,
+                decoded.height,
+                matrix,
+                true
+            ).also { transformed ->
+                if (transformed !== decoded && !decoded.isRecycled) decoded.recycle()
+            }
+        } catch (error: Throwable) {
+            if (!decoded.isRecycled) decoded.recycle()
+            throw error
+        }
+    }
+
+    private fun calculateDecodeSampleSize(width: Int, height: Int): Int {
+        var sample = 1
+        while (width / sample > MAX_DECODE_LONG_EDGE ||
+            height / sample > MAX_DECODE_LONG_EDGE
+        ) {
+            sample *= 2
+        }
+        return sample
+    }
+
+    private fun orientationMatrix(orientation: Int): Matrix? {
+        return when (orientation) {
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> Matrix().apply {
+                setScale(-1f, 1f)
+            }
+
+            ExifInterface.ORIENTATION_ROTATE_180 -> Matrix().apply {
+                setRotate(180f)
+            }
+
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> Matrix().apply {
+                setScale(1f, -1f)
+            }
+
+            ExifInterface.ORIENTATION_TRANSPOSE -> Matrix().apply {
+                setRotate(90f)
+                postScale(-1f, 1f)
+            }
+
+            ExifInterface.ORIENTATION_ROTATE_90 -> Matrix().apply {
+                setRotate(90f)
+            }
+
+            ExifInterface.ORIENTATION_TRANSVERSE -> Matrix().apply {
+                setRotate(-90f)
+                postScale(-1f, 1f)
+            }
+
+            ExifInterface.ORIENTATION_ROTATE_270 -> Matrix().apply {
+                setRotate(-90f)
+            }
+
+            else -> null
         }
     }
 
@@ -272,6 +393,10 @@ class WatermarkEngine @Inject constructor(
         exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, exifTimestamp)
         exif.setAttribute(ExifInterface.TAG_DATETIME_DIGITIZED, exifTimestamp)
         exif.setAttribute(ExifInterface.TAG_DATETIME, exifTimestamp)
+        exif.setAttribute(
+            ExifInterface.TAG_ORIENTATION,
+            ExifInterface.ORIENTATION_NORMAL.toString()
+        )
         exif.saveAttributes()
     }
 
@@ -324,6 +449,7 @@ class WatermarkEngine @Inject constructor(
     private companion object {
         const val PHOTO_DIRECTORY = "photos"
         const val MAX_LONG_EDGE = 1_600
+        const val MAX_DECODE_LONG_EDGE = 3_200
         const val JPEG_QUALITY = 80
         const val BACKGROUND_ALPHA = 153 // 60% opacity.
         const val FONT_SIZE_RATIO = 0.025f

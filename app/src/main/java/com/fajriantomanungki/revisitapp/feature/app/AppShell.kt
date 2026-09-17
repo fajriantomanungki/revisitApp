@@ -57,6 +57,7 @@ import androidx.core.content.ContextCompat
 import com.fajriantomanungki.revisitapp.data.dashboard.DashboardCoverageSnapshot
 import com.fajriantomanungki.revisitapp.data.local.entity.LaporanKegiatanEntity
 import com.fajriantomanungki.revisitapp.data.local.entity.PendataanEntity
+import com.fajriantomanungki.revisitapp.data.local.entity.FotoEntity
 import com.fajriantomanungki.revisitapp.data.local.entity.WilayahEntity
 import com.fajriantomanungki.revisitapp.data.local.model.SyncStatus
 import com.fajriantomanungki.revisitapp.data.pendataan.PendataanFormSubmission
@@ -66,6 +67,7 @@ import com.fajriantomanungki.revisitapp.domain.safety.LogoutCheckResult
 import com.fajriantomanungki.revisitapp.feature.dashboard.DashboardScreen
 import com.fajriantomanungki.revisitapp.feature.pendataan.PendataanFormScreen
 import com.fajriantomanungki.revisitapp.feature.laporan.LaporanKegiatanScreen
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @Composable
@@ -87,6 +89,7 @@ fun RevisitAppShell(
     onRefreshCoverage: () -> Unit,
     onSend: () -> Unit,
     onSavePendataan: suspend (PendataanFormSubmission) -> Result<Unit>,
+    onLoadPhotos: suspend (String) -> List<FotoEntity>,
     onSaveLaporanKegiatan: suspend (tanggal: String, rangkuman: String, siapKirim: Boolean) -> Result<Unit>,
     onLogout: suspend () -> LogoutCheckResult,
     onDeletePendataan: suspend (PendataanEntity) -> Boolean
@@ -94,6 +97,7 @@ fun RevisitAppShell(
     var selectedTab by remember { mutableIntStateOf(0) }
     var isFormOpen by rememberSaveable { mutableStateOf(false) }
     var editingRow by remember { mutableStateOf<PendataanEntity?>(null) }
+    var editingPhotos by remember { mutableStateOf<List<FotoEntity>>(emptyList()) }
     var isLoggingOut by remember { mutableStateOf(false) }
     var rowToDelete by remember { mutableStateOf<PendataanEntity?>(null) }
     var isDeleting by remember { mutableStateOf(false) }
@@ -153,6 +157,34 @@ fun RevisitAppShell(
         )
     }
 
+    fun openEdit(row: PendataanEntity) {
+        editingRow = row
+        editingPhotos = emptyList()
+        isFormOpen = false
+        coroutineScope.launch {
+            val result: Result<List<FotoEntity>> = try {
+                Result.success(onLoadPhotos(row.idRecord))
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                Result.failure(error)
+            }
+            if (editingRow?.idRecord != row.idRecord) return@launch
+            result.fold(
+                onSuccess = {
+                    editingPhotos = it
+                    isFormOpen = true
+                },
+                onFailure = {
+                    editingRow = null
+                    snackbarHostState.showSnackbar(
+                        it.message ?: "Foto lama tidak dapat dimuat."
+                    )
+                }
+            )
+        }
+    }
+
     rowToDelete?.let { candidate ->
         AlertDialog(
             onDismissRequest = { if (!isDeleting) rowToDelete = null },
@@ -168,9 +200,13 @@ fun RevisitAppShell(
                     onClick = {
                         coroutineScope.launch {
                             isDeleting = true
-                            val deleted = runCatching {
+                            val deleted = try {
                                 onDeletePendataan(candidate)
-                            }.getOrDefault(false)
+                            } catch (cancellation: CancellationException) {
+                                throw cancellation
+                            } catch (_: Throwable) {
+                                false
+                            }
                             isDeleting = false
                             rowToDelete = null
                             snackbarHostState.showSnackbar(
@@ -203,10 +239,12 @@ fun RevisitAppShell(
             locationHelper = locationHelper,
             watermarkEngine = watermarkEngine,
             existing = editingRow,
+            existingPhotos = editingPhotos,
             onSave = onSavePendataan,
             onSaved = {
                 isFormOpen = false
                 editingRow = null
+                editingPhotos = emptyList()
                 selectedTab = 0
                 coroutineScope.launch {
                     snackbarHostState.showSnackbar("Pendataan tersimpan di perangkat.")
@@ -215,6 +253,7 @@ fun RevisitAppShell(
             onBack = {
                 isFormOpen = false
                 editingRow = null
+                editingPhotos = emptyList()
             }
         )
         return
@@ -263,25 +302,25 @@ fun RevisitAppShell(
                 onSend = onSend,
                 canAdd = wilayah.isNotEmpty(),
                 onDelete = { rowToDelete = it },
-                onEdit = {
-                    editingRow = it
-                    isFormOpen = true
-                },
+                onEdit = ::openEdit,
                 isLoggingOut = isLoggingOut,
                 onLogout = {
                     coroutineScope.launch {
                         isLoggingOut = true
-                        val result = runCatching { onLogout() }
-                            .getOrElse { error ->
-                                LogoutCheckResult(
-                                    canLogout = false,
-                                    draftCount = 0,
-                                    siapKirimCount = 0,
-                                    mengirimCount = 0,
-                                    gagalCount = 0,
-                                    warningMessage = error.message ?: "Logout gagal."
-                                )
-                            }
+                        val result = try {
+                            onLogout()
+                        } catch (cancellation: CancellationException) {
+                            throw cancellation
+                        } catch (error: Throwable) {
+                            LogoutCheckResult(
+                                canLogout = false,
+                                draftCount = 0,
+                                siapKirimCount = 0,
+                                mengirimCount = 0,
+                                gagalCount = 0,
+                                warningMessage = error.message ?: "Logout gagal."
+                            )
+                        }
                         isLoggingOut = false
                         if (!result.canLogout) {
                             snackbarHostState.showSnackbar(
@@ -294,7 +333,7 @@ fun RevisitAppShell(
                     if (wilayah.isEmpty()) {
                         coroutineScope.launch {
                             snackbarHostState.showSnackbar(
-                        "Master wilayah belum tersedia. Perbarui data wilayah terlebih dahulu."
+                                "Master wilayah belum tersedia. Perbarui data wilayah terlebih dahulu."
                             )
                         }
                     } else {

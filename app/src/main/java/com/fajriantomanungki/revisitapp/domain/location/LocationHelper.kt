@@ -77,6 +77,15 @@ class LocationHelper @Inject constructor(
         ) == PackageManager.PERMISSION_GRANTED
     }
 
+    /** True bila Android memberikan lokasi presisi maupun perkiraan. */
+    fun hasLocationPermission(): Boolean {
+        return hasFineLocationPermission() ||
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+    }
+
     /**
      * Memeriksa apakah provider lokasi perangkat aktif.
      */
@@ -108,7 +117,7 @@ class LocationHelper @Inject constructor(
     suspend fun captureCurrentLocation(
         timeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS
     ): LocationCaptureResult {
-        if (!hasFineLocationPermission()) {
+        if (!hasLocationPermission()) {
             return LocationCaptureResult.Failure(
                 reason = LocationFailureReason.PERMISSION_DENIED
             )
@@ -127,7 +136,13 @@ class LocationHelper @Inject constructor(
             }
 
             val request = CurrentLocationRequest.Builder()
-                .setPriority(Priority.PRIORITY_HIGH_ACCURACY)
+                .setPriority(
+                    if (hasFineLocationPermission()) {
+                        Priority.PRIORITY_HIGH_ACCURACY
+                    } else {
+                        Priority.PRIORITY_BALANCED_POWER_ACCURACY
+                    }
+                )
                 .setMaxUpdateAgeMillis(0L)
                 .setDurationMillis(timeoutMillis.coerceAtLeast(MIN_TIMEOUT_MILLIS))
                 .build()
