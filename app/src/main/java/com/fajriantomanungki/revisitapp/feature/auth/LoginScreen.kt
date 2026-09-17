@@ -1,5 +1,6 @@
 package com.fajriantomanungki.revisitapp.feature.auth
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,10 +42,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.fajriantomanungki.revisitapp.R
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -146,22 +150,22 @@ fun LoginScreen(
                                     .background(Color.White.copy(alpha = 0.16f)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text(
-                                    text = "SE",
-                                    color = Color.White,
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Bold
+                                Image(
+                                    painter = painterResource(id = R.drawable.revisitse2026_icon),
+                                    contentDescription = "Logo revisit SE2026",
+                                    modifier = Modifier.size(46.dp),
+                                    contentScale = ContentScale.Fit
                                 )
                             }
                             Column {
                                 Text(
-                                    text = "RevisitApp",
+                                    text = "revisit SE2026",
                                     color = Color.White,
                                     style = MaterialTheme.typography.headlineSmall,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "PENDATAAN LAPANGAN",
+                                    text = "APLIKASI PENDATAAN SE2026",
                                     color = Color.White.copy(alpha = 0.82f),
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.SemiBold
