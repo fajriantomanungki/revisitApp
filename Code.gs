@@ -141,6 +141,8 @@ var SHEET_HEADERS = {
     'username',
     'nama',
     'password_hash',
+    'kode_kabupaten',
+    'kabupaten',
     'aktif',
     'created_at',
     'updated_at'
@@ -1661,6 +1663,8 @@ function ensureDefaultAdminUnlocked_(spreadsheet) {
     username: 'manungki.fajri',
     nama: 'Administrator Utama',
     password_hash: sha256Hex_('1234'),
+    kode_kabupaten: '',
+    kabupaten: '',
     aktif: true,
     created_at: now,
     updated_at: now
@@ -1831,7 +1835,8 @@ function ensureSheetWithHeaders_(spreadsheet, sheetName, headers) {
     'tanggal'
   ];
   textColumnsBySheet[CONFIG.SHEETS.ADMIN] = [
-    'username'
+    'username',
+    'kode_kabupaten'
   ];
 
   var textHeaders = textColumnsBySheet[sheetName] || [];
@@ -2628,10 +2633,11 @@ function handleDashboardPage_(params) {
 }
 
 function getDashboardBootstrap(request) {
-  assertDashboardRequestAccess_(request);
-
-  var masterRows = getMasterRecords_();
-  var workers = getDashboardWorkers_();
+  var admin = assertDashboardRequestAccess_(request);
+  var masterRows = getMasterRecords_().filter(function(master) {
+    return toText_(master.kode_kab) === admin.kode_kabupaten;
+  });
+  var workers = getDashboardWorkers_(admin.kode_kabupaten);
   var kabupaten = {};
   var kecamatan = {};
 
@@ -2662,6 +2668,8 @@ function getDashboardBootstrap(request) {
   return {
     ok: true,
     generated_at: new Date().toISOString(),
+    kode_kabupaten: admin.kode_kabupaten,
+    kabupaten_admin: admin.kabupaten,
     versi_master: getMasterVersion_(masterRows),
     jumlah_sls: masterRows.length,
     jumlah_petugas: workers.length,
@@ -2672,10 +2680,11 @@ function getDashboardBootstrap(request) {
 }
 
 function getDashboardData(request) {
-  assertDashboardRequestAccess_(request);
+  var admin = assertDashboardRequestAccess_(request);
   var filters = normalizeDashboardFilters_(
     request && request.filters ? request.filters : request
   );
+  scopeDashboardFiltersToAdmin_(filters, admin);
 
   return buildDashboardData_(filters);
 }
@@ -2700,10 +2709,168 @@ function getDashboardSession_(request) {
 }
 
 function assertDashboardRequestAccess_(request) {
-  return assertDashboardAccess_(
-    getDashboardToken_(request),
-    getDashboardSession_(request)
+  var session = getDashboardSession_(request);
+  if (!session) {
+    throw new ApiError(
+      'LOGIN_DASHBOARD_DIBUTUHKAN',
+      'Sesi admin dashboard diperlukan. Silakan login terlebih dahulu.'
+    );
+  }
+
+  var username = getDashboardSessionUser_(session);
+  if (!username) {
+    throw new ApiError(
+      'SESI_DASHBOARD_TIDAK_VALID',
+      'Sesi admin dashboard tidak valid atau sudah kedaluwarsa.'
+    );
+  }
+
+  return getDashboardAdminByUsername_(username);
+}
+
+function getDashboardAdminByUsername_(username) {
+  var normalizedUsername = toText_(username).toLowerCase();
+  var rows = readSheetObjects_(CONFIG.SHEETS.ADMIN);
+  var found = null;
+
+  rows.some(function(row) {
+    if (toText_(row.username).toLowerCase() === normalizedUsername) {
+      found = row;
+      return true;
+    }
+    return false;
+  });
+
+  if (
+    !found ||
+    !normalizeBoolean_(found.aktif, 'aktif', false)
+  ) {
+    throw new ApiError(
+      'SESI_DASHBOARD_TIDAK_VALID',
+      'Akun admin tidak ditemukan atau sudah nonaktif.'
+    );
+  }
+
+  return getDashboardAdminContext_(found);
+}
+
+function getDashboardAdminContext_(adminRow) {
+  var code = toText_(
+    adminRow.kode_kabupaten || adminRow.kode_kab || ''
   );
+  var masterRows = getMasterRecords_();
+  var counties = {};
+
+  masterRows.forEach(function(master) {
+    var masterCode = toText_(master.kode_kab);
+    if (
+      masterCode &&
+      !counties[masterCode]
+    ) {
+      counties[masterCode] = {
+        kode_kabupaten: masterCode,
+        kabupaten: toText_(master.kabupaten) || masterCode
+      };
+    }
+  });
+
+  var countyCodes = Object.keys(counties);
+  if (!code) {
+    /*
+     * Instalasi satu kabupaten tetap kompatibel dengan admin lama. Bila
+     * master berisi lebih dari satu kabupaten, kode wajib diisi eksplisit
+     * agar admin tidak memperoleh akses lintas wilayah.
+     */
+    if (countyCodes.length !== 1) {
+      throw new ApiError(
+        'ADMIN_KABUPATEN_BELUM_DIATUR',
+        'Kode kabupaten admin belum diatur pada sheet admin.'
+      );
+    }
+    code = countyCodes[0];
+  }
+
+  var county = counties[code];
+  if (!county) {
+    throw new ApiError(
+      'ADMIN_KABUPATEN_TIDAK_DITEMUKAN',
+      'Kode kabupaten admin tidak ditemukan pada master_wilayah.'
+    );
+  }
+
+  return {
+    username: toText_(adminRow.username).toLowerCase(),
+    nama: toText_(adminRow.nama) || toText_(adminRow.username),
+    kode_kabupaten: code,
+    kode_kab: code,
+    kabupaten: county.kabupaten
+  };
+}
+
+function assertDashboardCountyScope_(requestedCode, admin) {
+  var adminCode = toText_(admin && admin.kode_kabupaten);
+  var requested = toText_(requestedCode);
+
+  if (!adminCode) {
+    throw new ApiError(
+      'ADMIN_KABUPATEN_BELUM_DIATUR',
+      'Kode kabupaten admin belum diatur pada sheet admin.'
+    );
+  }
+
+  if (
+    requested &&
+    requested !== adminCode
+  ) {
+    throw new ApiError(
+      'AKSES_KABUPATEN_DITOLAK',
+      'Data hanya dapat diakses pada kabupaten admin yang sedang login.'
+    );
+  }
+
+  return adminCode;
+}
+
+function scopeDashboardFiltersToAdmin_(filters, admin) {
+  filters.kode_kab = assertDashboardCountyScope_(
+    filters.kode_kab,
+    admin
+  );
+
+  if (filters.id_petugas) {
+    var worker = getDashboardWorkerById_(filters.id_petugas);
+    if (
+      getWorkerCountyCode_(worker) !==
+      admin.kode_kabupaten
+    ) {
+      throw new ApiError(
+        'AKSES_KABUPATEN_DITOLAK',
+        'Petugas berada di luar kabupaten admin yang sedang login.'
+      );
+    }
+  }
+
+  return filters;
+}
+
+function scopeDashboardReportOptionsToAdmin_(options, admin) {
+  options.kode_kab = assertDashboardCountyScope_(
+    options.kode_kab,
+    admin
+  );
+  var worker = getDashboardWorkerById_(options.id_petugas);
+
+  if (
+    getWorkerCountyCode_(worker) !==
+    admin.kode_kabupaten
+  ) {
+    throw new ApiError(
+      'AKSES_KABUPATEN_DITOLAK',
+      'Petugas berada di luar kabupaten admin yang sedang login.'
+    );
+  }
+
+  return options;
 }
 
 function assertDashboardAccess_(suppliedToken, suppliedSession) {
@@ -2839,11 +3006,15 @@ function loginDashboard(request) {
       );
     }
 
+    var admin = getDashboardAdminContext_(found);
     return {
       ok: true,
       session: createDashboardSession_(username),
       username: username,
-      nama: toText_(found.nama) || username
+      nama: admin.nama,
+      kode_kabupaten: admin.kode_kabupaten,
+      kode_kab: admin.kode_kab,
+      kabupaten: admin.kabupaten
     };
   } finally {
     lock.releaseLock();
@@ -2852,7 +3023,7 @@ function loginDashboard(request) {
 
 /** Pendaftaran admin baru hanya dapat dilakukan oleh admin yang sudah login. */
 function registerDashboardAdmin(request) {
-  assertDashboardRequestAccess_(request);
+  var admin = assertDashboardRequestAccess_(request);
   request = request || {};
   var username = requireString_(request.username, 'username', 100)
     .toLowerCase();
@@ -2896,6 +3067,8 @@ function registerDashboardAdmin(request) {
       username: username,
       nama: nama,
       password_hash: sha256Hex_(password),
+      kode_kabupaten: admin.kode_kabupaten,
+      kabupaten: admin.kabupaten,
       aktif: true,
       created_at: now,
       updated_at: now
@@ -2907,7 +3080,13 @@ function registerDashboardAdmin(request) {
           ? values[header]
           : '';
       })]);
-    return {ok: true, username: username, nama: nama};
+    return {
+      ok: true,
+      username: username,
+      nama: nama,
+      kode_kabupaten: admin.kode_kabupaten,
+      kabupaten: admin.kabupaten
+    };
   } finally {
     lock.releaseLock();
   }
@@ -2918,11 +3097,12 @@ function logoutDashboard(request) {
   return {ok: true};
 }
 
-function getDashboardWorkers_() {
+function getDashboardWorkers_(kodeKabupaten) {
+  var scopeCode = toText_(kodeKabupaten);
   var rows = readSheetObjects_(CONFIG.SHEETS.PETUGAS);
   var seen = {};
 
-  return rows.filter(function(row) {
+  var workers = rows.filter(function(row) {
     var id = toText_(row.id_petugas);
     if (!id || seen[id.toLowerCase()]) {
       return false;
@@ -2938,6 +3118,12 @@ function getDashboardWorkers_() {
       aktif: normalizeBoolean_(row.aktif, 'aktif', false)
     };
   });
+
+  return scopeCode
+    ? workers.filter(function(worker) {
+      return getWorkerCountyCode_(worker) === scopeCode;
+    })
+    : workers;
 }
 
 function getDashboardWorkerById_(idPetugas) {
@@ -3559,7 +3745,7 @@ function objectValues_(object) {
  * PIN tidak pernah dikembalikan ke browser dan tidak pernah disimpan mentah.
  */
 function saveDashboardPetugas(request) {
-  assertDashboardRequestAccess_(request);
+  var admin = assertDashboardRequestAccess_(request);
   request = request || {};
 
   var idPetugas = requireString_(
@@ -3575,12 +3761,14 @@ function saveDashboardPetugas(request) {
   }
 
   var nama = requireString_(request.nama, 'nama', 150);
-  var kodeKabupaten = requireString_(
-    request.kode_kabupaten || request.kode_kab,
-    'kode_kabupaten',
-    50
+  var requestedKodeKabupaten = toText_(
+    request.kode_kabupaten || request.kode_kab
   );
-  var kabupaten = findKabupatenName_(kodeKabupaten);
+  var kodeKabupaten = assertDashboardCountyScope_(
+    requestedKodeKabupaten,
+    admin
+  );
+  var kabupaten = admin.kabupaten;
   var aktif = normalizeBoolean_(
     request.aktif,
     'aktif',
@@ -3630,6 +3818,17 @@ function saveDashboardPetugas(request) {
         existing = row;
       }
     });
+
+    if (
+      existing &&
+      getWorkerCountyCode_(existing) &&
+      getWorkerCountyCode_(existing) !== kodeKabupaten
+    ) {
+      throw new ApiError(
+        'AKSES_KABUPATEN_DITOLAK',
+        'Petugas berada di luar kabupaten admin yang sedang login.'
+      );
+    }
 
     if (rowNumber < 0 && !pin) {
       throw new ApiError(
@@ -3723,7 +3922,7 @@ function writeDashboardFields_(sheet, rowNumber, headers, fields) {
  * - baris lama yang tidak ada di file import tidak dihapus.
  */
 function importDashboardMaster(request) {
-  assertDashboardRequestAccess_(request);
+  var admin = assertDashboardRequestAccess_(request);
   request = request || {};
   var records = request.records;
 
@@ -3743,6 +3942,14 @@ function importDashboardMaster(request) {
   var normalizedRecords = records.map(
     normalizeDashboardMasterInput_
   );
+  normalizedRecords.forEach(function(record) {
+    if (record.kode_kab !== admin.kode_kabupaten) {
+      throw new ApiError(
+        'AKSES_KABUPATEN_DITOLAK',
+        'Import master hanya diperbolehkan untuk kabupaten admin yang sedang login.'
+      );
+    }
+  });
   var duplicateCodes = {};
   normalizedRecords.forEach(function(record) {
     if (duplicateCodes[record.kode_sls]) {
@@ -3925,8 +4132,9 @@ function normalizeDashboardMasterInput_(raw) {
  * sebagai fallback agar instalasi lama tetap dapat mencoba fitur ini.
  */
 function generatePetugasReport(request) {
-  assertDashboardRequestAccess_(request);
+  var admin = assertDashboardRequestAccess_(request);
   var options = normalizeReportOptions_(request);
+  scopeDashboardReportOptionsToAdmin_(options, admin);
   var dataset = buildPetugasReportDataset_(options);
 
   if (dataset.records.length > CONFIG.MAX_REPORT_RECORDS) {
@@ -4036,8 +4244,9 @@ function generatePetugasReport(request) {
  * oleh dashboard, sehingga tetap ditampilkan sebagai catatan pada laporan.
  */
 function generateLaporanKegiatanReport(request) {
-  assertDashboardRequestAccess_(request);
+  var admin = assertDashboardRequestAccess_(request);
   var options = normalizeReportOptions_(request);
+  scopeDashboardReportOptionsToAdmin_(options, admin);
   var dataset = buildPetugasReportDataset_(options);
   var activityRows = getActivityReportRows_(options);
   var grouped = {};
@@ -4151,6 +4360,12 @@ function getActivityReportRows_(options) {
     if (
       toText_(row.id_petugas).toLowerCase() !==
       options.id_petugas.toLowerCase()
+    ) {
+      return false;
+    }
+    if (
+      options.kode_kab &&
+      toText_(row.kode_kab) !== options.kode_kab
     ) {
       return false;
     }
@@ -4336,6 +4551,13 @@ function buildPetugasReportDataset_(options) {
       seenRecords[idRecord.toLowerCase()] ||
       idPetugas.toLowerCase() !==
       worker.id_petugas.toLowerCase()
+    ) {
+      return;
+    }
+
+    if (
+      options.kode_kab &&
+      toText_(row.kode_kab) !== options.kode_kab
     ) {
       return;
     }
