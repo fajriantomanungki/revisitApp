@@ -94,6 +94,34 @@ fun LaporanKegiatanScreen(
     }
     val selectedReport = laporan.firstOrNull { it.tanggal == selectedDate }
 
+    fun retryReport(report: LaporanKegiatanEntity) {
+        if (isSaving || report.statusKirim == LaporanKegiatanStatus.MENGIRIM) return
+        isSaving = true
+        errorMessage = null
+        infoMessage = null
+        scope.launch {
+            val result = try {
+                onSave(report.tanggal, report.rangkuman, true)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Throwable) {
+                Result.failure(error)
+            }
+            isSaving = false
+            result.fold(
+                onSuccess = {
+                    selectedDate = report.tanggal
+                    infoMessage = "Laporan ${report.tanggal} masuk antrean pengiriman."
+                    onSend()
+                },
+                onFailure = { throwable ->
+                    errorMessage = throwable.message
+                        ?: "Laporan gagal dimasukkan ke antrean."
+                }
+            )
+        }
+    }
+
     fun saveReport(siapKirim: Boolean) {
         if (summary.trim().isBlank()) {
             errorMessage = "Rangkuman kegiatan wajib diisi."
@@ -242,7 +270,14 @@ fun LaporanKegiatanScreen(
                             modifier = Modifier.weight(1f),
                             shape = MaterialTheme.shapes.medium
                         ) {
-                            Text(if (isSaving) "Menyimpan..." else "Simpan & Kirim")
+                            Text(
+                                when {
+                                    isSaving -> "Menyimpan..."
+                                    selectedReport?.statusKirim == LaporanKegiatanStatus.GAGAL ->
+                                        "Kirim Kembali"
+                                    else -> "Simpan & Kirim"
+                                }
+                            )
                         }
                     }
                     selectedReport?.let { report ->
@@ -356,20 +391,61 @@ fun LaporanKegiatanScreen(
             }
         } else {
             items(laporan, key = { it.idLaporan }) { report ->
-                Row(
+                Card(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    shape = MaterialTheme.shapes.medium,
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    )
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(report.tanggal, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            report.rangkuman,
-                            maxLines = 2,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(report.tanggal, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    report.rangkuman,
+                                    maxLines = 2,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            StatusPill(report.statusKirim)
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    selectedDate = report.tanggal
+                                    errorMessage = null
+                                    infoMessage = "Mode edit laporan ${report.tanggal}."
+                                },
+                                enabled = !isSaving &&
+                                    report.statusKirim != LaporanKegiatanStatus.MENGIRIM,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Text("Edit")
+                            }
+                            if (report.statusKirim == LaporanKegiatanStatus.GAGAL) {
+                                Button(
+                                    onClick = { retryReport(report) },
+                                    enabled = !isSaving,
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Text("Kirim Kembali")
+                                }
+                            }
+                        }
                     }
-                    StatusPill(report.statusKirim)
                 }
             }
         }
