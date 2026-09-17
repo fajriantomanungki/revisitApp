@@ -1,4 +1,4 @@
-# RevisitApp — Aplikasi Pendataan Lapangan
+# revisit SE2026 — Aplikasi Pendataan Lapangan
 
 Project Android Kotlin/Jetpack Compose dengan arsitektur offline-first:
 
