@@ -36,6 +36,7 @@ import com.fajriantomanungki.revisitapp.ui.theme.RevisitAppTheme
 import com.fajriantomanungki.revisitapp.worker.PhotoRetentionScheduler
 import com.fajriantomanungki.revisitapp.worker.SyncWorkScheduler
 import dagger.hilt.android.AndroidEntryPoint
+import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -332,7 +333,13 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         onLoadPhotos = { idRecord ->
-                            fotoDao.getByRecord(idRecord)
+                            fotoDao.getByRecord(idRecord).filter { photo ->
+                                photo.driveFileId?.isNotBlank() == true ||
+                                    photo.pathLokal
+                                        .takeIf { it.isNotBlank() }
+                                        ?.let(::File)
+                                        ?.isFile == true
+                            }
                         },
                         onLogout = {
                             logoutGuard.logoutIfAllowed(idPetugas) {

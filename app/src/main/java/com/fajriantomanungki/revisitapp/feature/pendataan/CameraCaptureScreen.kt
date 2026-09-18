@@ -1,8 +1,14 @@
 package com.fajriantomanungki.revisitapp.feature.pendataan
 
 import android.Manifest
+import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
+import android.media.MediaScannerConnection
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.view.Surface
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -32,6 +38,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -42,11 +49,18 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import java.io.File
+import java.io.IOException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
- * Capture satu foto menggunakan CameraX. File output dibuat pada cache
- * internal, lalu callback menyerahkannya ke form untuk diberi watermark.
- * File asli tidak pernah dipindahkan ke galeri publik.
+ * Capture atau memilih satu foto bukti.
+ *
+ * Hasil kamera dibuat sementara di cache agar tetap kompatibel dengan alur
+ * watermark yang sudah ada. Sebelum callback dipanggil, salinan foto kamera
+ * disimpan ke galeri perangkat. Foto yang dipilih dari galeri hanya disalin
+ * sementara ke cache dan tidak mengubah file asli milik pengguna.
  */
 @Composable
 fun CameraCaptureScreen(
@@ -57,26 +71,62 @@ fun CameraCaptureScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val previewView = remember { PreviewView(context) }
+    val coroutineScope = rememberCoroutineScope()
     var hasCameraPermission by remember {
         mutableStateOf(context.hasCameraPermission())
     }
+    var hasLegacyGalleryWritePermission by remember {
+        mutableStateOf(context.hasLegacyGalleryWritePermission())
+    }
     var showPermissionRationale by rememberSaveable {
-        mutableStateOf(!hasCameraPermission)
+        mutableStateOf(
+            !hasCameraPermission || !hasLegacyGalleryWritePermission
+        )
     }
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
     var isTakingPhoto by remember { mutableStateOf(false) }
+    var isImportingGallery by remember { mutableStateOf(false) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        hasCameraPermission = granted
-        if (!granted) {
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        hasCameraPermission = permissions[Manifest.permission.CAMERA]
+            ?: context.hasCameraPermission()
+        hasLegacyGalleryWritePermission = context.hasLegacyGalleryWritePermission()
+        if (!hasCameraPermission) {
             onCaptureError("Izin kamera diperlukan untuk mengambil foto bukti.")
+        } else if (!hasLegacyGalleryWritePermission) {
+            onCaptureError(
+                "Izin penyimpanan diperlukan pada Android 9 atau lebih lama " +
+                    "agar foto kamera dapat tersimpan di galeri."
+            )
+        }
+    }
+
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        isImportingGallery = true
+        coroutineScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                copyGalleryImageToCache(context, uri)
+            }
+            isImportingGallery = false
+            result.fold(
+                onSuccess = onPhotoCaptured,
+                onFailure = { error ->
+                    onCaptureError(
+                        "Gagal mengambil foto dari galeri: " +
+                            (error.message ?: "file tidak dapat dibaca")
+                    )
+                }
+            )
         }
     }
 
     LaunchedEffect(Unit) {
-        if (!hasCameraPermission) {
+        if (!hasCameraPermission || !hasLegacyGalleryWritePermission) {
             showPermissionRationale = true
         }
     }
@@ -122,29 +172,39 @@ fun CameraCaptureScreen(
         }
     }
 
-    if (showPermissionRationale && !hasCameraPermission) {
+    if (showPermissionRationale &&
+        (!hasCameraPermission || !hasLegacyGalleryWritePermission)
+    ) {
         AlertDialog(
             onDismissRequest = { showPermissionRationale = false },
             title = { Text("Izin kamera") },
             text = {
                 Text(
-                    "Kamera digunakan untuk mengambil foto bukti pendataan. " +
-                        "Foto asli hanya diproses di penyimpanan privat aplikasi."
+                    if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+                        "Kamera digunakan untuk mengambil foto bukti. Pada Android 9 " +
+                            "atau lebih lama, izin penyimpanan juga diperlukan agar " +
+                            "hasil foto kamera dapat disimpan ke galeri perangkat."
+                    } else {
+                        "Kamera digunakan untuk mengambil foto bukti. Foto hasil " +
+                            "jepretan juga akan disalin ke galeri perangkat."
+                    }
                 )
             },
             confirmButton = {
                 Button(
                     onClick = {
                         showPermissionRationale = false
-                        permissionLauncher.launch(Manifest.permission.CAMERA)
+                        permissionLauncher.launch(context.requiredCameraPermissions())
                     }
                 ) {
                     Text("Izinkan")
                 }
             },
             dismissButton = {
-                OutlinedButton(onClick = onCancel) {
-                    Text("Batal")
+                OutlinedButton(
+                    onClick = { showPermissionRationale = false }
+                ) {
+                    Text("Nanti")
                 }
             }
         )
@@ -162,9 +222,11 @@ fun CameraCaptureScreen(
             )
         } else {
             Text(
-                text = "Izin kamera belum diberikan.",
+                text = "Izin kamera belum diberikan. Anda tetap dapat memilih foto dari galeri.",
                 color = Color.White,
-                modifier = Modifier.align(Alignment.Center)
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(24.dp)
             )
         }
 
@@ -183,7 +245,7 @@ fun CameraCaptureScreen(
             ) {
                 OutlinedButton(
                     onClick = onCancel,
-                    enabled = !isTakingPhoto,
+                    enabled = !isTakingPhoto && !isImportingGallery,
                     modifier = Modifier.weight(1f)
                 ) {
                     Text("Batal")
@@ -216,8 +278,22 @@ fun CameraCaptureScreen(
                                 override fun onImageSaved(
                                     outputFileResults: ImageCapture.OutputFileResults
                                 ) {
-                                    isTakingPhoto = false
-                                    onPhotoCaptured(outputFile)
+                                    coroutineScope.launch {
+                                        val galleryResult = withContext(Dispatchers.IO) {
+                                            publishCapturedPhotoToGallery(
+                                                context = context,
+                                                sourceFile = outputFile
+                                            )
+                                        }
+                                        isTakingPhoto = false
+                                        galleryResult.exceptionOrNull()?.let { error ->
+                                            onCaptureError(
+                                                "Foto berhasil diambil, tetapi salinan ke galeri gagal: " +
+                                                    (error.message ?: "kesalahan penyimpanan")
+                                            )
+                                        }
+                                        onPhotoCaptured(outputFile)
+                                    }
                                 }
 
                                 override fun onError(
@@ -234,8 +310,10 @@ fun CameraCaptureScreen(
                         )
                     },
                     enabled = hasCameraPermission &&
+                        hasLegacyGalleryWritePermission &&
                         imageCapture != null &&
-                        !isTakingPhoto,
+                        !isTakingPhoto &&
+                        !isImportingGallery,
                     modifier = Modifier.weight(1f)
                 ) {
                     if (isTakingPhoto) {
@@ -245,7 +323,119 @@ fun CameraCaptureScreen(
                     }
                 }
             }
+
+            OutlinedButton(
+                onClick = { galleryLauncher.launch("image/*") },
+                enabled = !isTakingPhoto && !isImportingGallery,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (isImportingGallery) {
+                    CircularProgressIndicator(strokeWidth = 2.dp)
+                } else {
+                    Text("Pilih dari Galeri")
+                }
+            }
         }
+    }
+}
+
+private fun copyGalleryImageToCache(
+    context: Context,
+    uri: Uri
+): Result<File> = runCatching {
+    val input = context.contentResolver.openInputStream(uri)
+        ?: throw IOException("File galeri tidak dapat dibuka")
+    val outputFile = File.createTempFile(
+        "gallery_",
+        ".img",
+        context.cacheDir
+    )
+    try {
+        input.use { source ->
+            outputFile.outputStream().use { target ->
+                source.copyTo(target)
+            }
+        }
+        if (!outputFile.isFile || outputFile.length() <= 0L) {
+            throw IOException("File galeri kosong atau tidak dapat dibaca")
+        }
+        outputFile
+    } catch (error: Throwable) {
+        outputFile.delete()
+        throw error
+    }
+}
+
+private fun publishCapturedPhotoToGallery(
+    context: Context,
+    sourceFile: File
+): Result<Unit> = runCatching {
+    require(sourceFile.isFile) {
+        "File kamera tidak tersedia"
+    }
+
+    val displayName = "RevisitSE2026_${System.currentTimeMillis()}.jpg"
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val resolver = context.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
+            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            put(
+                MediaStore.Images.Media.RELATIVE_PATH,
+                Environment.DIRECTORY_PICTURES + "/" + GALLERY_DIRECTORY
+            )
+            put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            values
+        ) ?: throw IOException("Galeri perangkat tidak dapat membuat file baru")
+
+        try {
+            val output = resolver.openOutputStream(uri, "w")
+                ?: throw IOException("Galeri perangkat tidak dapat ditulis")
+            sourceFile.inputStream().use { source ->
+                output.use { target -> source.copyTo(target) }
+            }
+            val readyValues = ContentValues().apply {
+                put(MediaStore.Images.Media.IS_PENDING, 0)
+            }
+            resolver.update(uri, readyValues, null, null)
+        } catch (error: Throwable) {
+            resolver.delete(uri, null, null)
+            throw error
+        }
+    } else {
+        if (!context.hasLegacyGalleryWritePermission()) {
+            throw SecurityException("Izin penyimpanan belum diberikan")
+        }
+        @Suppress("DEPRECATION")
+        val picturesDirectory = Environment.getExternalStoragePublicDirectory(
+            Environment.DIRECTORY_PICTURES
+        )
+        val targetDirectory = File(picturesDirectory, GALLERY_DIRECTORY)
+        if (!targetDirectory.exists() && !targetDirectory.mkdirs()) {
+            throw IOException("Folder galeri RevisitSE2026 tidak dapat dibuat")
+        }
+        val targetFile = File(targetDirectory, displayName)
+        sourceFile.copyTo(targetFile, overwrite = false)
+        MediaScannerConnection.scanFile(
+            context,
+            arrayOf(targetFile.absolutePath),
+            arrayOf("image/jpeg"),
+            null
+        )
+    }
+}
+
+private fun Context.requiredCameraPermissions(): Array<String> {
+    return if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+        arrayOf(
+            Manifest.permission.CAMERA,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE
+        )
+    } else {
+        arrayOf(Manifest.permission.CAMERA)
     }
 }
 
@@ -255,3 +445,13 @@ private fun Context.hasCameraPermission(): Boolean {
         Manifest.permission.CAMERA
     ) == PackageManager.PERMISSION_GRANTED
 }
+
+private fun Context.hasLegacyGalleryWritePermission(): Boolean {
+    return Build.VERSION.SDK_INT > Build.VERSION_CODES.P ||
+        ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE
+        ) == PackageManager.PERMISSION_GRANTED
+}
+
+private const val GALLERY_DIRECTORY = "RevisitSE2026"
