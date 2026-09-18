@@ -161,7 +161,7 @@ fun LoginScreen(
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "PENDATAAN LAPANGAN",
+                                    text = "Revisit SE2026",
                                     color = Color.White.copy(alpha = 0.82f),
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.SemiBold
@@ -169,7 +169,7 @@ fun LoginScreen(
                             }
                         }
                         Text(
-                            text = "Mencatat ekonomi Indonesia, satu wilayah setiap langkah.",
+                            text = "Mencatat ekonomi Indonesia.",
                             color = Color.White,
                             style = MaterialTheme.typography.titleMedium
                         )
