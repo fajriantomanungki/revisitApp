@@ -2637,7 +2637,6 @@ function getDashboardBootstrap(request) {
   var masterRows = getMasterRecords_().filter(function(master) {
     return toText_(master.kode_kab) === admin.kode_kabupaten;
   });
-  var workers = getDashboardWorkers_(admin.kode_kabupaten);
   var kabupaten = {};
   var kecamatan = {};
 
@@ -2672,10 +2671,48 @@ function getDashboardBootstrap(request) {
     kabupaten_admin: admin.kabupaten,
     versi_master: getMasterVersion_(masterRows),
     jumlah_sls: masterRows.length,
-    jumlah_petugas: workers.length,
-    petugas: workers.map(publicDashboardWorker_),
     kabupaten: objectValues_(kabupaten).sort(sortByLabel_),
     kecamatan: objectValues_(kecamatan).sort(sortByLabel_)
+  };
+}
+
+/**
+ * Mengirim daftar petugas dalam halaman kecil agar dashboard tidak perlu
+ * mengirim dan merender seluruh petugas saat login.
+ */
+function getDashboardWorkersPage(request) {
+  request = request || {};
+  var admin = assertDashboardRequestAccess_(request);
+  var page = parseInt(request.page, 10);
+  var pageSize = parseInt(request.page_size, 10);
+  var query = toText_(request.query).toLowerCase().slice(0, 100);
+
+  if (!isFinite(page) || page < 1) page = 1;
+  if (!isFinite(pageSize) || pageSize < 10) pageSize = 25;
+  pageSize = Math.min(pageSize, 100);
+
+  var workers = getCachedDashboardWorkers_(admin.kode_kabupaten);
+  if (query) {
+    workers = workers.filter(function(worker) {
+      return [worker.id_petugas, worker.nama, worker.kabupaten]
+        .join(' ')
+        .toLowerCase()
+        .indexOf(query) >= 0;
+    });
+  }
+
+  var total = workers.length;
+  var totalPages = Math.max(1, Math.ceil(total / pageSize));
+  page = Math.min(page, totalPages);
+  var start = (page - 1) * pageSize;
+
+  return {
+    ok: true,
+    page: page,
+    page_size: pageSize,
+    total: total,
+    total_pages: totalPages,
+    petugas: workers.slice(start, start + pageSize)
   };
 }
 
@@ -3740,6 +3777,49 @@ function objectValues_(object) {
   });
 }
 
+function getCachedDashboardWorkers_(kodeKabupaten) {
+  var cache = CacheService.getScriptCache();
+  var cacheKey = dashboardWorkerCacheKey_(kodeKabupaten);
+  var cached = cache.get(cacheKey);
+
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch (error) {
+      cache.remove(cacheKey);
+    }
+  }
+
+  var workers = getDashboardWorkers_(kodeKabupaten)
+    .map(publicDashboardWorker_);
+  var serialized = JSON.stringify(workers);
+
+  // CacheService limits each value to 100 KB; skip caching larger lists.
+  if (serialized.length <= 90000) {
+    try {
+      cache.put(cacheKey, serialized, 60);
+    } catch (error) {
+      // The list is still returned even if the optional cache is unavailable.
+    }
+  }
+
+  return workers;
+}
+
+function dashboardWorkerCacheKey_(kodeKabupaten) {
+  return 'dashboard_workers_v1_' + toText_(kodeKabupaten || 'all');
+}
+
+function clearDashboardWorkerCache_(kodeKabupaten) {
+  try {
+    CacheService.getScriptCache().remove(
+      dashboardWorkerCacheKey_(kodeKabupaten)
+    );
+  } catch (error) {
+    // Cache invalidation is best-effort; the cache also expires after 60 sec.
+  }
+}
+
 /**
  * Menambah atau memperbarui petugas dari dashboard.
  * PIN tidak pernah dikembalikan ke browser dan tidak pernah disimpan mentah.
@@ -3862,6 +3942,8 @@ function saveDashboardPetugas(request) {
     } else {
       writeDashboardFields_(sheet, rowNumber, headers, fields);
     }
+
+    clearDashboardWorkerCache_(fields.kode_kabupaten);
 
     return {
       ok: true,
