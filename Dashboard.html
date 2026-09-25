@@ -720,6 +720,44 @@
       font-weight: 800;
     }
 
+    .worker-pager {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-top: 7px;
+    }
+
+    .worker-pager .button {
+      min-height: 30px;
+      padding: 6px 9px;
+      font-size: 11px;
+    }
+
+    .worker-page-info {
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.4;
+    }
+
+    .worker-list-toolbar {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 0 18px 14px;
+    }
+
+    .worker-list-toolbar .field {
+      width: min(100%, 340px);
+    }
+
+    @media (max-width: 620px) {
+      .worker-list-toolbar {
+        align-items: stretch;
+        flex-direction: column;
+      }
+    }
+
     .stat-note {
       display: inline-flex;
       align-items: center;
@@ -882,10 +920,16 @@
               </select>
             </div>
             <div class="field">
-              <label for="filter-petugas">Petugas</label>
+              <label for="filter-petugas-search">Petugas</label>
+              <input id="filter-petugas-search" type="search" maxlength="100" placeholder="Cari kode atau nama">
               <select id="filter-petugas">
                 <option value="">Semua petugas</option>
               </select>
+              <div class="worker-pager">
+                <button class="button secondary" id="filter-petugas-prev" type="button" aria-label="Halaman petugas sebelumnya">‹</button>
+                <span class="worker-page-info" id="filter-petugas-page-info">Belum dimuat</span>
+                <button class="button secondary" id="filter-petugas-next" type="button" aria-label="Halaman petugas berikutnya">›</button>
+              </div>
             </div>
             <div class="field">
               <label for="filter-date-from">Tanggal mulai</label>
@@ -1014,10 +1058,16 @@
             </div>
             <div class="form-grid">
               <div class="field">
-                <label for="report-petugas">Petugas *</label>
+                <label for="report-petugas-search">Petugas * · cari kode atau nama</label>
+                <input id="report-petugas-search" type="search" maxlength="100" placeholder="Cari petugas">
                 <select id="report-petugas">
                   <option value="">Pilih petugas</option>
                 </select>
+                <div class="worker-pager">
+                  <button class="button secondary" id="report-petugas-prev" type="button" aria-label="Halaman petugas sebelumnya">‹</button>
+                  <span class="worker-page-info" id="report-petugas-page-info">Belum dimuat</span>
+                  <button class="button secondary" id="report-petugas-next" type="button" aria-label="Halaman petugas berikutnya">›</button>
+                </div>
               </div>
               <div class="field">
                 <label for="report-kab">Filter kabupaten</label>
@@ -1063,10 +1113,16 @@
             </div>
             <div class="form-grid">
               <div class="field">
-                <label for="activity-report-petugas">Petugas *</label>
+                <label for="activity-report-petugas-search">Petugas * · cari kode atau nama</label>
+                <input id="activity-report-petugas-search" type="search" maxlength="100" placeholder="Cari petugas">
                 <select id="activity-report-petugas">
                   <option value="">Pilih petugas</option>
                 </select>
+                <div class="worker-pager">
+                  <button class="button secondary" id="activity-report-petugas-prev" type="button" aria-label="Halaman petugas sebelumnya">‹</button>
+                  <span class="worker-page-info" id="activity-report-petugas-page-info">Belum dimuat</span>
+                  <button class="button secondary" id="activity-report-petugas-next" type="button" aria-label="Halaman petugas berikutnya">›</button>
+                </div>
               </div>
               <div class="field">
                 <label for="activity-report-date-from">Tanggal mulai</label>
@@ -1136,6 +1192,17 @@
               <div>
                 <h2>Daftar Petugas</h2>
                 <p>PIN tidak pernah ditampilkan; yang disimpan server adalah hash SHA-256.</p>
+              </div>
+            </div>
+            <div class="worker-list-toolbar">
+              <div class="field">
+                <label for="table-workers-search">Cari petugas</label>
+                <input id="table-workers-search" type="search" maxlength="100" placeholder="Kode atau nama petugas">
+              </div>
+              <div class="worker-pager">
+                <button class="button secondary" id="table-workers-prev" type="button">‹ Sebelumnya</button>
+                <span class="worker-page-info" id="table-workers-page-info">Belum dimuat</span>
+                <button class="button secondary" id="table-workers-next" type="button">Berikutnya ›</button>
               </div>
             </div>
             <div class="table-wrap">
@@ -1219,12 +1286,38 @@
      * Dashboard selalu dimulai dari halaman login. Token legacy tidak
      * digunakan untuk melewati autentikasi admin.
      */
+    function createWorkerPageState() {
+      function createPage() {
+        return {
+          page: 1,
+          pageSize: 25,
+          query: '',
+          total: 0,
+          totalPages: 1,
+          items: [],
+          loaded: false,
+          loading: false,
+          requestId: 0,
+          searchTimer: null
+        };
+      }
+
+      return {
+        filter: createPage(),
+        report: createPage(),
+        activity: createPage(),
+        management: createPage()
+      };
+    }
+
     var state = {
       token: '',
       session: '',
       bootstrap: null,
       data: null,
-      authenticated: false
+      authenticated: false,
+      workerPages: createWorkerPageState(),
+      workersById: Object.create(null)
     };
 
     function byId(id) {
@@ -1349,33 +1442,6 @@
       );
       populateKecamatanOptions('filter-kec', kecamatan, '');
       populateKecamatanOptions('report-kec', kecamatan, '');
-      setOptions(
-        'filter-petugas',
-        bootstrap.petugas || [],
-        'id_petugas',
-        function(item) {
-          return item.id_petugas + ' · ' + (item.nama || '-');
-        },
-        true
-      );
-      setOptions(
-        'report-petugas',
-        bootstrap.petugas || [],
-        'id_petugas',
-        function(item) {
-          return item.id_petugas + ' · ' + (item.nama || '-');
-        },
-        false
-      );
-      setOptions(
-        'activity-report-petugas',
-        bootstrap.petugas || [],
-        'id_petugas',
-        function(item) {
-          return item.id_petugas + ' · ' + (item.nama || '-');
-        },
-        false
-      );
     }
 
     function populateKecamatanOptions(selectId, items, selectedKab) {
@@ -1392,6 +1458,180 @@
         },
         true
       );
+    }
+
+    var workerPageConfig = {
+      filter: {
+        selectId: 'filter-petugas',
+        searchId: 'filter-petugas-search',
+        previousId: 'filter-petugas-prev',
+        nextId: 'filter-petugas-next',
+        infoId: 'filter-petugas-page-info',
+        includeAll: true
+      },
+      report: {
+        selectId: 'report-petugas',
+        searchId: 'report-petugas-search',
+        previousId: 'report-petugas-prev',
+        nextId: 'report-petugas-next',
+        infoId: 'report-petugas-page-info',
+        includeAll: false
+      },
+      activity: {
+        selectId: 'activity-report-petugas',
+        searchId: 'activity-report-petugas-search',
+        previousId: 'activity-report-petugas-prev',
+        nextId: 'activity-report-petugas-next',
+        infoId: 'activity-report-petugas-page-info',
+        includeAll: false
+      },
+      management: {
+        searchId: 'table-workers-search',
+        previousId: 'table-workers-prev',
+        nextId: 'table-workers-next',
+        infoId: 'table-workers-page-info'
+      }
+    };
+
+    function renderWorkerPage(context) {
+      var pageState = state.workerPages[context];
+      var config = workerPageConfig[context];
+      if (!pageState || !config) return;
+
+      if (config.selectId) {
+        var select = byId(config.selectId);
+        var currentValue = select.value;
+        var items = pageState.items.slice();
+        var currentWorker = currentValue
+          ? state.workersById[currentValue.toLowerCase()]
+          : null;
+        if (currentWorker && !items.some(function(item) {
+          return item.id_petugas === currentValue;
+        })) {
+          items.push(currentWorker);
+        }
+
+        var emptyLabel = config.includeAll ? 'Semua petugas' : 'Pilih petugas';
+        var html = '<option value="">' + emptyLabel + '</option>';
+        if (!pageState.items.length && pageState.loading) {
+          html += '<option value="" disabled>Memuat petugas…</option>';
+        } else if (!pageState.items.length && pageState.loaded) {
+          html += '<option value="" disabled>Tidak ada petugas</option>';
+        }
+        items.forEach(function(worker) {
+          html += '<option value="' + escapeHtml(worker.id_petugas) + '">' +
+            escapeHtml(worker.id_petugas + ' · ' + (worker.nama || '-')) +
+            '</option>';
+        });
+        select.innerHTML = html;
+        if (currentValue) select.value = currentValue;
+        select.disabled = pageState.loading;
+      }
+
+      var info = byId(config.infoId);
+      if (info) {
+        if (pageState.loading) {
+          info.textContent = 'Memuat daftar petugas…';
+        } else if (!pageState.loaded) {
+          info.textContent = 'Belum dimuat';
+        } else if (!pageState.total) {
+          info.textContent = 'Tidak ada petugas';
+        } else {
+          var start = (pageState.page - 1) * pageState.pageSize + 1;
+          var end = Math.min(pageState.page * pageState.pageSize, pageState.total);
+          info.textContent = 'Halaman ' + pageState.page + ' dari ' +
+            pageState.totalPages + ' · ' + start + '–' + end +
+            ' dari ' + pageState.total;
+        }
+      }
+
+      if (config.previousId) {
+        byId(config.previousId).disabled = pageState.loading ||
+          !pageState.loaded || pageState.page <= 1;
+      }
+      if (config.nextId) {
+        byId(config.nextId).disabled = pageState.loading ||
+          !pageState.loaded || pageState.page >= pageState.totalPages;
+      }
+      if (context === 'management') renderWorkers();
+    }
+
+    async function loadWorkerPage(context, force) {
+      var pageState = state.workerPages[context];
+      if (!state.authenticated || !pageState) return;
+      if (!force && (pageState.loaded || pageState.loading)) return;
+
+      var requestId = ++pageState.requestId;
+      pageState.loading = true;
+      renderWorkerPage(context);
+      try {
+        var response = await callServer('getDashboardWorkersPage', authorizedPayload({
+          page: pageState.page,
+          page_size: pageState.pageSize,
+          query: pageState.query
+        }));
+        if (requestId !== pageState.requestId) return;
+
+        pageState.page = response.page || 1;
+        pageState.pageSize = response.page_size || pageState.pageSize;
+        pageState.total = Number(response.total) || 0;
+        pageState.totalPages = Math.max(1, Number(response.total_pages) || 1);
+        pageState.items = response.petugas || [];
+        pageState.loaded = true;
+        pageState.items.forEach(function(worker) {
+          state.workersById[worker.id_petugas.toLowerCase()] = worker;
+        });
+      } catch (error) {
+        if (requestId !== pageState.requestId) return;
+        if (/akses|session|token|admin/i.test(error.message || '')) {
+          state.token = '';
+          state.session = '';
+          setDashboardVisible(false);
+          setLoginError('Sesi dashboard berakhir. Silakan masuk kembali.');
+        } else {
+          showToast(error.message, true);
+        }
+      } finally {
+        if (requestId === pageState.requestId) {
+          pageState.loading = false;
+          renderWorkerPage(context);
+        }
+      }
+    }
+
+    function changeWorkerPage(context, offset) {
+      var pageState = state.workerPages[context];
+      if (!pageState || pageState.loading || !pageState.loaded) return;
+      var nextPage = Math.max(1, Math.min(
+        pageState.totalPages,
+        pageState.page + offset
+      ));
+      if (nextPage === pageState.page) return;
+      pageState.page = nextPage;
+      loadWorkerPage(context, true);
+    }
+
+    function handleWorkerSearch(context) {
+      var pageState = state.workerPages[context];
+      var config = workerPageConfig[context];
+      var input = byId(config.searchId);
+      input.addEventListener('input', function() {
+        window.clearTimeout(pageState.searchTimer);
+        pageState.searchTimer = window.setTimeout(function() {
+          pageState.query = input.value.trim();
+          pageState.page = 1;
+          loadWorkerPage(context, true);
+        }, 250);
+      });
+    }
+
+    function loadWorkerPagesForTab(tabName) {
+      if (tabName === 'overview') loadWorkerPage('filter', false);
+      if (tabName === 'reports') {
+        loadWorkerPage('report', false);
+        loadWorkerPage('activity', false);
+      }
+      if (tabName === 'petugas') loadWorkerPage('management', false);
     }
 
     function collectDashboardFilters() {
@@ -1561,9 +1801,8 @@
     }
 
     function renderWorkers() {
-      var workers = state.bootstrap && state.bootstrap.petugas
-        ? state.bootstrap.petugas
-        : [];
+      var pageState = state.workerPages.management;
+      var workers = pageState.items || [];
       byId('table-workers').innerHTML = workers.length
         ? workers.map(function(worker) {
           return '<tr>' +
@@ -1580,16 +1819,15 @@
             escapeHtml(worker.id_petugas) + '\')">Edit</button></td>' +
             '</tr>';
         }).join('')
-        : emptyRow(5, 'Belum ada petugas.');
+        : emptyRow(5, pageState.loading
+          ? 'Memuat daftar petugas…'
+          : pageState.loaded
+            ? 'Tidak ada petugas yang cocok.'
+            : 'Daftar petugas belum dimuat.');
     }
 
     function editPetugas(id) {
-      var workers = state.bootstrap && state.bootstrap.petugas
-        ? state.bootstrap.petugas
-        : [];
-      var worker = workers.find(function(item) {
-        return item.id_petugas === id;
-      });
+      var worker = state.workersById[String(id).toLowerCase()];
       if (!worker) return;
       byId('petugas-id').value = worker.id_petugas;
       byId('petugas-nama').value = worker.nama || '';
@@ -1709,6 +1947,9 @@
             ? 'Petugas berhasil ditambahkan.'
             : 'Petugas berhasil diperbarui.'
         );
+        if (response.petugas && response.petugas.id_petugas) {
+          state.workersById[response.petugas.id_petugas.toLowerCase()] = response.petugas;
+        }
         clearPetugasForm();
         await loadBootstrap();
       } catch (error) {
@@ -1824,11 +2065,16 @@
           authorizedPayload({})
         );
         populateFilterOptions();
-        renderWorkers();
         byId('master-info').textContent =
           number(state.bootstrap.jumlah_sls) + ' SLS · versi ' +
           number(state.bootstrap.versi_master);
-        await refreshDashboard();
+        var pageTasks = ['report', 'activity', 'management'].filter(function(context) {
+          return state.workerPages[context].loaded;
+        }).map(function(context) {
+          return loadWorkerPage(context, true);
+        });
+        pageTasks.push(loadWorkerPage('filter', true));
+        await Promise.all([refreshDashboard()].concat(pageTasks));
       } catch (error) {
         if (/akses|session|token|admin/i.test(error.message || '')) {
           state.token = '';
@@ -1859,6 +2105,7 @@
       };
       byId('page-title').textContent = titles[tabName][0];
       byId('page-description').textContent = titles[tabName][1];
+      loadWorkerPagesForTab(tabName);
     }
 
     async function submitDashboardLogin(event) {
@@ -1895,6 +2142,8 @@
       state.session = '';
       state.bootstrap = null;
       state.data = null;
+      state.workerPages = createWorkerPageState();
+      state.workersById = Object.create(null);
       setDashboardVisible(false);
       byId('dashboard-password').value = '';
       byId('dashboard-username').focus();
@@ -1908,6 +2157,16 @@
       document.querySelectorAll('.nav-button').forEach(function(button) {
         button.addEventListener('click', function() {
           activateTab(button.getAttribute('data-tab'));
+        });
+      });
+      Object.keys(workerPageConfig).forEach(function(context) {
+        var config = workerPageConfig[context];
+        handleWorkerSearch(context);
+        byId(config.previousId).addEventListener('click', function() {
+          changeWorkerPage(context, -1);
+        });
+        byId(config.nextId).addEventListener('click', function() {
+          changeWorkerPage(context, 1);
         });
       });
       byId('filter-kab').addEventListener('change', function() {
